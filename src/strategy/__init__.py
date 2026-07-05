@@ -206,3 +206,57 @@ STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "rsi": RSI,
     "macd": MACD,
 }
+
+
+# ── Majority-vote meta-strategy ─────────────────────────────────────────────
+
+
+class MajorityVote(BaseStrategy):
+    """Meta-strategy: runs SMA, RSI and MACD in parallel and takes the
+    majority decision.  At least 2 of 3 must agree on buy or sell.
+
+    Confidence = average confidence of agreeing strategies.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._strategies: list[BaseStrategy] = [
+            SmaCrossover(),
+            RSI(),
+            MACD(),
+        ]
+
+    async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
+        votes: dict[str, list[float]] = {"buy": [], "sell": []}
+        details: dict[str, Any] = {}
+
+        for s in self._strategies:
+            sig = await s.compute_signal(ohlcv)
+            details[s.name] = {"action": sig.action, "confidence": round(sig.confidence, 2)}
+            if sig.action in ("buy", "sell"):
+                votes[sig.action].append(sig.confidence)
+
+        meta: dict[str, Any] = {"votes": details}
+
+        if len(votes["buy"]) >= 2:
+            confidence = sum(votes["buy"]) / len(votes["buy"])
+            logger.info(
+                "MAJORITY BUY  ({}/{})  avg_conf={:.2f}  {}",
+                len(votes["buy"]), len(self._strategies), confidence,
+                {k: v["action"] for k, v in details.items()},
+            )
+            return Signal(action="buy", confidence=confidence, metadata=meta)
+
+        if len(votes["sell"]) >= 2:
+            confidence = sum(votes["sell"]) / len(votes["sell"])
+            logger.info(
+                "MAJORITY SELL  ({}/{})  avg_conf={:.2f}  {}",
+                len(votes["sell"]), len(self._strategies), confidence,
+                {k: v["action"] for k, v in details.items()},
+            )
+            return Signal(action="sell", confidence=confidence, metadata=meta)
+
+        return Signal(metadata=meta)
+
+
+STRATEGY_REGISTRY["majority_vote"] = MajorityVote
