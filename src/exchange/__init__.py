@@ -29,7 +29,7 @@ class ExchangeManager:
             "apiKey": settings.api_key,
             "secret": settings.api_secret,
             "enableRateLimit": True,
-            "sandbox": settings.exchange_sandbox,
+            "sandbox": False,
             "options": {"defaultType": "spot"},
         })
         self._consecutive_errors: int = 0

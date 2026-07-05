@@ -22,11 +22,9 @@ from src.config import settings
 from src.exchange import ExchangeManager
 from src.execution import ExecutionManager
 from src.logger import setup_logger
-from src.strategy import SmaCrossover
+from src.strategy import STRATEGY_REGISTRY
 
-STRATEGIES = {
-    "sma_crossover": SmaCrossover,
-}
+from src.strategy import Signal
 
 
 async def main_loop() -> None:
@@ -34,7 +32,7 @@ async def main_loop() -> None:
     logger.info("traderbot starting — mode={}", settings.risk_mode)
 
     exchange = ExchangeManager()
-    strategy_cls = STRATEGIES.get(settings.strategy)
+    strategy_cls = STRATEGY_REGISTRY.get(settings.strategy)
     if strategy_cls is None:
         logger.error("Unknown strategy: {}", settings.strategy)
         sys.exit(1)
