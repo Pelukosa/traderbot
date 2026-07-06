@@ -187,8 +187,8 @@ class ExecutionManager:
         if self._trade_ctx and self._trade_ctx.buy_valley_value != 0:
             valley_depth = abs(self._trade_ctx.buy_valley_value)
 
-        # SL base: 1.5% fijo, pero se amplía si el valle es muy profundo
-        sl_pct = max(1.5, min(valley_depth * 0.15, 4.0))
+        # SL base: 0.6% fijo, se amplía si el valle es muy profundo (máx 2%)
+        sl_pct = max(0.6, min(valley_depth * 0.08, 2.0))
         sl = price * (1 - sl_pct / 100.0)
 
         # Sin TP fijo — la venta la decide la señal del histograma
