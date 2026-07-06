@@ -34,5 +34,23 @@
     "pnl": null,
     "balance": 125.4494,
     "details": {}
+  },
+  {
+    "type": "startup",
+    "message": "Bot iniciado \u2014 modo LIVE",
+    "timestamp": "2026-07-06T23:41:51.414083+00:00",
+    "price": null,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "heartbeat",
+    "message": "\u26aa ESPERANDO SE\u00d1AL",
+    "timestamp": "2026-07-06T23:42:03.475580+00:00",
+    "price": 55972.9,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
   }
 ]

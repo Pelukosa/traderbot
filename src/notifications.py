@@ -97,29 +97,12 @@ def format_message(event: BotEvent) -> str:
 
 
 def send_whatsapp(text: str) -> bool:
-    """Send a WhatsApp message using the Hermes send_message tool."""
-    if not NOTIFY_ENABLED:
-        logger.debug("Notifications disabled — would send: {}", text[:80])
-        return False
+    """WhatsApp delivery handled by cron job (enviar_eventos.py every 3m).
 
-    try:
-        # Import Hermes send_message tool dynamically
-        result = subprocess.run(
-            [HERMES_CLI, "send_message", NOTIFY_CHAT, text],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode == 0:
-            logger.info("WhatsApp notification sent")
-            return True
-        else:
-            logger.warning("WhatsApp send failed: {}", result.stderr[:300])
-            return False
-    except FileNotFoundError:
-        logger.warning("Hermes CLI not found — notification not sent")
-        return False
-    except Exception as e:
-        logger.warning("Failed to send notification: {}", e)
-        return False
+    This function is a no-op — the bot writes events to data/events.json
+    and the cron job reads them and delivers via Hermes delivery system.
+    """
+    return True
 
 
 def notify(event: BotEvent) -> bool:
@@ -199,10 +182,10 @@ def notify_shutdown():
 
 def notify_heartbeat(balance: float, price: float, in_position: bool):
     """Daily heartbeat so you know it's alive."""
-    pos = "🟢 EN POSICIÓN" if in_position else "⚪ ESPERANDO SEÑAL"
+    pos = "EN POSICIÓN" if in_position else "ESPERANDO"
     return notify(BotEvent(
         type="heartbeat",
-        message=f"{pos}",
+        message=f"{pos} | 💰{price:.0f}€ | 🏦{balance:.0f}€",
         price=price,
         balance=balance,
     ))
