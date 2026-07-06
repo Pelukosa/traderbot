@@ -204,10 +204,7 @@ class ExecutionManager:
             log_trade("buy", symbol, amount, price, 0.0, balance_eur=eur_free)
         else:
             try:
-                raw = await self._exchange.safe_call(
-                    self._exchange.exchange.create_order,
-                    symbol, "market", "buy", amount,
-                )
+                raw = await self._exchange.create_market_buy_order(symbol, amount)
                 logger.info("RAW ORDER RESPONSE: {}", raw)
                 if raw is None:
                     logger.error("Kraken returned None order — insufficient funds or rate limit")
@@ -285,6 +282,12 @@ class ExecutionManager:
                     sell_amount = entry_amount
                 if sell_amount > 0:
                     order = await self._exchange.create_market_sell_order(symbol, sell_amount)
+                    if order is None:
+                        logger.error("Kraken returned None on sell — manual intervention may be needed")
+                        return
+                    if not isinstance(order, dict):
+                        logger.error("Unexpected sell response type: {}", type(order))
+                        return
                     logger.info("SELL ORDER PLACED: {}", order)
                     fills = order.get("fills", [])
                     if fills:
