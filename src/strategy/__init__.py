@@ -231,8 +231,12 @@ class MACDDivergence(BaseStrategy):
     def __init__(self) -> None:
         super().__init__()
         self._hist_buffer: list[float] = []  # rolling buffer of histogram values
+        self._macd_buffer: list[float] = []  # rolling buffer of MACD line values
+        self._sig_buffer: list[float] = []   # rolling buffer of signal line values
         self._awaiting_action: str | None = None  # "buy" or "sell" pending
         self._confirm_count: int = 0
+        self._detected_valley: float | None = None  # last detected valley value
+        self._detected_peak: float | None = None   # last detected peak value
 
     @staticmethod
     def _ema(data: np.ndarray, period: int) -> np.ndarray:
@@ -244,14 +248,16 @@ class MACDDivergence(BaseStrategy):
             result[i] = (data[i] - result[i - 1]) * multiplier + result[i - 1]
         return result
 
-    def _histogram(self, closes: np.ndarray) -> float:
+    def _histogram(self, closes: np.ndarray) -> tuple[float, float, float]:
+        """Return (histogram, macd_line, signal_line) for the last candle."""
         ema_fast = self._ema(closes, self.fast)
         ema_slow = self._ema(closes, self.slow)
-        macd_line = ema_fast - ema_slow
-        valid = ~np.isnan(macd_line)
-        macd_line = macd_line[valid]
-        signal_line = self._ema(macd_line, self.signal)
-        return float(macd_line[-1] - signal_line[-1])
+        macd_line_arr = ema_fast - ema_slow
+        valid = ~np.isnan(macd_line_arr)
+        macd_line_arr = macd_line_arr[valid]
+        signal_line = self._ema(macd_line_arr, self.signal)
+        hist = float(macd_line_arr[-1] - signal_line[-1])
+        return hist, float(macd_line_arr[-1]), float(signal_line[-1])
 
     async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
         closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
@@ -259,16 +265,27 @@ class MACDDivergence(BaseStrategy):
         if len(closes) < min_len:
             return Signal(metadata={"reason": "insufficient data"})
 
-        hist = self._histogram(closes)
+        hist, macd_line_val, sig_line_val = self._histogram(closes)
         self._hist_buffer.append(hist)
+        self._macd_buffer.append(macd_line_val)
+        self._sig_buffer.append(sig_line_val)
 
-        # Keep last 5 values for detection
+        # Keep rolling buffers
         if len(self._hist_buffer) > 5:
             self._hist_buffer = self._hist_buffer[-5:]
+        if len(self._macd_buffer) > 5:
+            self._macd_buffer = self._macd_buffer[-5:]
+        if len(self._sig_buffer) > 5:
+            self._sig_buffer = self._sig_buffer[-5:]
 
-        meta: dict[str, Any] = {"histogram": round(hist, 2), "buffer": [round(h, 2) for h in self._hist_buffer]}
+        meta: dict[str, Any] = {
+            "histogram": round(hist, 2),
+            "macd_line": round(macd_line_val, 2),
+            "signal_line": round(sig_line_val, 2),
+            "buffer": [round(h, 2) for h in self._hist_buffer],
+        }
 
-        # Need at least 3 values to detect anything
+        # Need at least 4 values to detect anything
         if len(self._hist_buffer) < 4:
             return Signal(metadata=meta)
 
@@ -278,11 +295,28 @@ class MACDDivergence(BaseStrategy):
             if self._confirm_count >= self.confirm_velas:
                 # Execute the pending action
                 action = self._awaiting_action
+                signal_type = "valley_confirmed" if action == "buy" else "peak_confirmed"
+                confidence = min(
+                    abs(self._hist_buffer[-1] - self._hist_buffer[-2]) / max(abs(self._hist_buffer[-1]), 1.0),
+                    1.0,
+                ) + 0.3
+                confidence = min(confidence, 1.0)
+
+                # Add valley/peak context to metadata
+                if action == "buy" and self._detected_valley is not None:
+                    meta["valley_value"] = round(self._detected_valley, 2)
+                    meta["valley_to_entry_diff"] = round(hist - self._detected_valley, 2)
+                    meta["reversal_slope"] = round(abs(hist - self._detected_valley) / 2, 2)
+                elif action == "sell" and self._detected_peak is not None:
+                    meta["peak_value"] = round(self._detected_peak, 2)
+                    meta["peak_to_exit_diff"] = round(self._detected_peak - hist, 2)
+                    meta["reversal_slope"] = round(abs(self._detected_peak - hist) / 2, 2)
+
+                self._detected_valley = None
+                self._detected_peak = None
                 self._awaiting_action = None
                 self._confirm_count = 0
-                confidence = min(abs(self._hist_buffer[-1] - self._hist_buffer[-2]) / max(abs(self._hist_buffer[-1]), 1.0), 1.0) + 0.3
-                confidence = min(confidence, 1.0)
-                signal_type = "valley_confirmed" if action == "buy" else "peak_confirmed"
+
                 logger.info(
                     "MACD-DIV {}  hist={:.2f}  conf={:.2f}  type={}",
                     action.upper(), hist, confidence, signal_type,
@@ -295,28 +329,26 @@ class MACDDivergence(BaseStrategy):
                 return Signal(metadata={**meta, "confirming": self._awaiting_action, "count": self._confirm_count})
 
         # ── DETECTAR VALLE (compra) ──
-        # El histograma venía bajando (h3 > h2 > h1) y luego H1 es el valle:
-        #   h[0] > h[1] > h[2] (valle) < h[3]   → valle detectado en h[2]
-        #   La 1ª reversión es h[3], entramos tras h[4] (2 velas después)
+        #   h[-4] >= h[-3] > h[-2] < h[-1]  → valle en h[-2]
         h = self._hist_buffer
         if len(h) >= 4:
-            # Detectar valle: h[-4] >= h[-3] > h[-2] < h[-1]
-            # (el valle está en h[-2], h[-1] es la 1ª reversión)
             if h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and h[-1] < 0:
-                # Valle detectado en h[-2], h[-1] es reversión (vela 1)
-                # Esperamos 2 velas de confirmación
+                self._detected_valley = h[-2]
                 self._awaiting_action = "buy"
-                self._confirm_count = 1  # h[-1] is the 1st confirmation candle
+                self._confirm_count = 1
                 logger.info(
                     "MACD-DIV VALLE detectado  hist={:.2f}  bottom={:.2f}  "
                     "esperando {} velas…",
                     hist, h[-2], self.confirm_velas,
                 )
-                return Signal(metadata={**meta, "signal": "valley_detected", "confirming": "buy", "count": 1})
+                return Signal(metadata={
+                    **meta, "signal": "valley_detected", "valley_value": round(h[-2], 2),
+                    "confirming": "buy", "count": 1,
+                })
 
             # Detectar pico: h[-4] <= h[-3] < h[-2] > h[-1]
             if h[-4] <= h[-3] < h[-2] > h[-1] and h[-2] > 0 and h[-1] > 0:
-                # Pico detectado en h[-2], h[-1] es reversión (vela 1)
+                self._detected_peak = h[-2]
                 self._awaiting_action = "sell"
                 self._confirm_count = 1
                 logger.info(
@@ -324,7 +356,10 @@ class MACDDivergence(BaseStrategy):
                     "esperando {} velas…",
                     hist, h[-2], self.confirm_velas,
                 )
-                return Signal(metadata={**meta, "signal": "peak_detected", "confirming": "sell", "count": 1})
+                return Signal(metadata={
+                    **meta, "signal": "peak_detected", "peak_value": round(h[-2], 2),
+                    "confirming": "sell", "count": 1,
+                })
 
         return Signal(metadata=meta)
 

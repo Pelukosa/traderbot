@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+import numpy as np
 from loguru import logger
 
 from src.config import settings
@@ -25,6 +27,24 @@ class Position:
     active: bool = True
 
 
+@dataclass
+class TradeContext:
+    """Context captured at entry time, passed to sell for ML logging."""
+    trade_id: str
+    strategy_name: str = ""
+    entry_timestamp: str = ""
+    # Buy-side histogram context
+    buy_histogram: float = 0.0
+    buy_valley_value: float = 0.0
+    buy_valley_to_entry_diff: float = 0.0
+    buy_reversal_slope: float = 0.0
+    buy_macd_line: float = 0.0
+    buy_signal_line: float = 0.0
+    buy_price: float = 0.0
+    # OHLVC snapshot at entry for market context
+    entry_ohlcv: list[list[float]] | None = None
+
+
 class OrderError(Exception):
     """Raised when order execution fails."""
 
@@ -40,6 +60,7 @@ class ExecutionManager:
     def __init__(self, exchange: ExchangeManager) -> None:
         self._exchange = exchange
         self._position: Position | None = None
+        self._trade_ctx: TradeContext | None = None
 
     @property
     def in_position(self) -> bool:
@@ -48,12 +69,33 @@ class ExecutionManager:
     def _simulate_only(self) -> bool:
         return settings.risk_mode == "simulation"
 
-    async def execute_signal(self, signal: Signal, price: float, strategy_name: str = "") -> None:
+    @staticmethod
+    def _market_context(ohlcv: list[list[float]]) -> dict[str, float]:
+        """Compute market context from the OHLCV window."""
+        if not ohlcv or len(ohlcv) < 20:
+            return {"trend_20": 0.0, "volatility_20": 0.0, "volume_ratio": 1.0}
+
+        closes = np.array([c[4] for c in ohlcv[-20:]])
+        volumes = np.array([c[5] for c in ohlcv[-20:]])
+        avg_volume = np.mean(volumes)
+
+        trend = (closes[-1] - closes[0]) / closes[0] * 100  # % change over 20 candles
+        volatility = float(np.std(closes / closes.mean())) * 100  # normalized std
+
+        # Volume ratio: last candle vs avg of last 20
+        vol_ratio = float(volumes[-1] / avg_volume) if avg_volume > 0 else 1.0
+
+        return {
+            "trend_20": round(trend, 2),
+            "volatility_20": round(volatility, 2),
+            "volume_ratio": round(vol_ratio, 2),
+        }
+
+    async def execute_signal(self, signal: Signal, price: float, strategy_name: str = "", ohlcv: list[list[float]] | None = None) -> None:
         """React to a strategy signal: open/close positions."""
         symbol = settings.trading_symbol
 
         if signal.action == "buy" and not self.in_position:
-            # Calculate 69% of EUR balance
             try:
                 bal = await self._exchange.fetch_balance()
                 eur_free = float(bal.get("EUR", {}).get("free", 0))
@@ -63,7 +105,6 @@ class ExecutionManager:
                 logger.warning("Could not fetch EUR balance, defaulting to 0")
 
             invest_eur = eur_free * 0.69
-            # Si no llega al mínimo de Kraken (~5€), sube al 95%
             if invest_eur < 5 and eur_free >= 5.5:
                 invest_eur = eur_free * 0.95
                 logger.info("69% ({:.2f}€) < 5€ mínimo — usando 95% ({:.2f}€)", eur_free * 0.69, invest_eur)
@@ -71,19 +112,34 @@ class ExecutionManager:
                 logger.warning("Insufficient EUR ({} < 5€) — skipping buy", round(invest_eur, 2))
                 return
 
+            # Save trade context for ML logging at close time
+            meta = signal.metadata
+            self._trade_ctx = TradeContext(
+                trade_id=uuid.uuid4().hex[:12],
+                strategy_name=strategy_name,
+                entry_timestamp=datetime.now(timezone.utc).isoformat(),
+                buy_histogram=meta.get("histogram", 0.0),
+                buy_valley_value=meta.get("valley_value", 0.0),
+                buy_valley_to_entry_diff=meta.get("valley_to_entry_diff", 0.0),
+                buy_reversal_slope=meta.get("reversal_slope", 0.0),
+                buy_macd_line=meta.get("macd_line", 0.0),
+                buy_signal_line=meta.get("signal_line", 0.0),
+                buy_price=price,
+                entry_ohlcv=ohlcv,
+            )
+
             size = invest_eur / price
             logger.info("Investing {:.2f}€ → {:.6f} BTC @ {:.2f}", invest_eur, size, price)
-            await self._open_long(symbol, size, price, eur_free, strategy_name)
+            await self._open_long(symbol, size, price, eur_free)
 
         elif signal.action == "sell" and self.in_position:
-            await self._close_position(symbol, strategy_name)
+            await self._close_position(symbol, ohlcv)
 
-        # Also execute macd_divergence signals directly (they run solo)
-        # Check exits whether in position or not
+        # Check stop / take-profit on every tick if in position
         if self.in_position:
             await self._check_exits(price)
 
-    async def _open_long(self, symbol: str, amount: float, price: float, eur_free: float = 0.0, strategy_name: str = "") -> None:
+    async def _open_long(self, symbol: str, amount: float, price: float, eur_free: float = 0.0) -> None:
         sl = price * (1 - settings.stop_loss_percent / 100.0)
         tp = price * (1 + settings.take_profit_percent / 100.0)
 
@@ -95,11 +151,8 @@ class ExecutionManager:
             log_trade("buy", symbol, amount, price, 0.0, balance_eur=eur_free)
         else:
             try:
-                order = await self._exchange.create_market_buy_order(
-                    symbol, amount
-                )
+                order = await self._exchange.create_market_buy_order(symbol, amount)
                 logger.info("ORDER PLACED: {}", order)
-                # Extract real fill price and fee from order response
                 fills = order.get("fills", [])
                 if fills:
                     avg_price = sum(f["price"] * f["amount"] for f in fills) / sum(f["amount"] for f in fills)
@@ -113,6 +166,9 @@ class ExecutionManager:
                           order_id=order.get("id", ""), balance_eur=eur_free)
                 amount = filled_amount
                 price = avg_price
+                # Update buy price in trade context with real fill
+                if self._trade_ctx:
+                    self._trade_ctx.buy_price = price
             except Exception as exc:
                 raise OrderError(f"Buy order failed: {exc}") from exc
 
@@ -125,18 +181,30 @@ class ExecutionManager:
             take_profit=tp,
         )
 
-    async def _close_position(self, symbol: str, strategy_name: str = "") -> None:
+    async def _close_position(self, symbol: str, current_ohlcv: list[list[float]] | None = None) -> None:
         if self._position is None:
             return
 
         entry_price = self._position.entry_price
         entry_amount = self._position.amount
+        trade_ctx = self._trade_ctx
+        entry_ts = trade_ctx.entry_timestamp if trade_ctx else ""
+        strategy_name = trade_ctx.strategy_name if trade_ctx else ""
+        trade_id = trade_ctx.trade_id if trade_ctx else ""
+        exit_ts = datetime.now(timezone.utc).isoformat()
+
+        # Compute duration
+        duration_min = 0.0
+        if entry_ts:
+            try:
+                entry_dt = datetime.fromisoformat(entry_ts)
+                exit_dt = datetime.fromisoformat(exit_ts)
+                duration_min = (exit_dt - entry_dt).total_seconds() / 60.0
+            except Exception:
+                pass
 
         if self._simulate_only():
-            logger.info(
-                "[SIM] SELL {} {} @ market",
-                entry_amount, symbol,
-            )
+            logger.info("[SIM] SELL {} {} @ market", entry_amount, symbol)
             log_trade("sell", symbol, entry_amount, entry_price, 0.0)
         else:
             try:
@@ -149,11 +217,8 @@ class ExecutionManager:
                 else:
                     sell_amount = entry_amount
                 if sell_amount > 0:
-                    order = await self._exchange.create_market_sell_order(
-                        symbol, sell_amount
-                    )
+                    order = await self._exchange.create_market_sell_order(symbol, sell_amount)
                     logger.info("SELL ORDER PLACED: {}", order)
-                    # Extract real fill price and fee
                     fills = order.get("fills", [])
                     if fills:
                         sell_price = sum(f["price"] * f["amount"] for f in fills) / sum(f["amount"] for f in fills)
@@ -163,26 +228,79 @@ class ExecutionManager:
                         sell_fee = float(order.get("fee", {}).get("cost", 0))
                     pnl_eur = (sell_price - entry_price) * sell_amount
                     pnl_pct = ((sell_price - entry_price) / entry_price) * 100
-                    # Fetch EUR balance after sell
+
                     try:
                         bal2 = await self._exchange.fetch_balance()
                         eur_after = float(bal2.get("EUR", {}).get("free", 0))
                     except Exception:
                         eur_after = 0.0
+
                     log_trade("sell", symbol, sell_amount, sell_price, sell_fee,
                               order_id=order.get("id", ""), pnl_eur=pnl_eur, pnl_pct=pnl_pct,
                               balance_eur=eur_after)
+
+                    # — Full ML context logging —
+                    # Buy-side context from trade_ctx (captured at entry)
+                    buy_h = trade_ctx.buy_histogram if trade_ctx else 0.0
+                    buy_v = trade_ctx.buy_valley_value if trade_ctx else 0.0
+                    buy_v2e = trade_ctx.buy_valley_to_entry_diff if trade_ctx else 0.0
+                    buy_rs = trade_ctx.buy_reversal_slope if trade_ctx else 0.0
+                    buy_macd = trade_ctx.buy_macd_line if trade_ctx else 0.0
+                    buy_sig = trade_ctx.buy_signal_line if trade_ctx else 0.0
+                    buy_px = trade_ctx.buy_price if trade_ctx else entry_price
+
+                    # Market context from entry OHLCV
+                    entry_market = self._market_context(trade_ctx.entry_ohlcv) if trade_ctx and trade_ctx.entry_ohlcv else {}
+
+                    # Market context from current OHLCV (for sell context)
+                    sell_market = self._market_context(current_ohlcv) if current_ohlcv else {}
+                    now = datetime.now(timezone.utc)
+
                     log_strategy_trade(
-                        strategy_name or "unknown", "sell", symbol,
-                        entry_price, sell_price, sell_amount,
-                        pnl_eur=pnl_eur, pnl_pct=pnl_pct, fee_eur=sell_fee,
+                        trade_id=trade_id or uuid.uuid4().hex[:12],
+                        strategy=strategy_name or "unknown",
+                        side="sell",
+                        symbol=symbol,
+                        entry_price=entry_price,
+                        exit_price=sell_price,
+                        entry_timestamp=entry_ts,
+                        exit_timestamp=exit_ts,
+                        duration_minutes=duration_min,
+                        amount=sell_amount,
+                        pnl_eur=pnl_eur,
+                        pnl_pct=pnl_pct,
+                        fee_eur=sell_fee,
+                        # Buy context
+                        buy_histogram=buy_h,
+                        buy_valley_value=buy_v,
+                        buy_valley_to_entry_diff=buy_v2e,
+                        buy_reversal_slope=buy_rs,
+                        buy_macd_line=buy_macd,
+                        buy_signal_line=buy_sig,
+                        buy_price=buy_px,
+                        # Sell context (from signal metadata — not available here, use market)
+                        sell_histogram=0.0,
+                        sell_peak_value=0.0,
+                        sell_peak_to_exit_diff=0.0,
+                        sell_reversal_slope=0.0,
+                        sell_macd_line=0.0,
+                        sell_signal_line=0.0,
+                        sell_price=sell_price,
+                        # Market context
+                        market_trend_20=entry_market.get("trend_20", sell_market.get("trend_20", 0.0)),
+                        market_volatility_20=entry_market.get("volatility_20", sell_market.get("volatility_20", 0.0)),
+                        market_volume_ratio=entry_market.get("volume_ratio", sell_market.get("volume_ratio", 1.0)),
+                        hour_of_day=now.hour,
+                        day_of_week=now.weekday(),
                     )
-                    logger.info("Position closed  entry={:.2f}  exit={:.2f}  pnl={:+.2f}€ ({:+.2f}%)",
-                                entry_price, sell_price, pnl_eur, pnl_pct)
+
+                    logger.info("Position closed  entry={:.2f}  exit={:.2f}  pnl={:+.2f}€ ({:+.2f}%%)  dur={:.0f}min",
+                                entry_price, sell_price, pnl_eur, pnl_pct, duration_min)
             except Exception as exc:
                 raise OrderError(f"Sell order failed: {exc}") from exc
 
         self._position = None
+        self._trade_ctx = None
 
     async def _check_exits(self, current_price: float) -> None:
         if self._position is None or not self._position.active:

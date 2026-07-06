@@ -92,7 +92,7 @@ async def main_loop() -> None:
             if signal.action != "hold":
                 current_price = float(ohlcv[-1][4])  # close price
                 logger.info("EXECUTING {} @ {:.2f} — conf={:.2f}", signal.action.upper(), current_price, signal.confidence)
-                await execution.execute_signal(signal, current_price, strategy_name=strategy.name)
+                await execution.execute_signal(signal, current_price, strategy_name=strategy.name, ohlcv=ohlcv)
 
             # Sleep 60s — check every new 1m candle
             await asyncio.sleep(45)
