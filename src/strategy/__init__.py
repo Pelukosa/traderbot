@@ -158,28 +158,23 @@ class MACD(BaseStrategy):
             result[i] = (data[i] - result[i - 1]) * multiplier + result[i - 1]
         return result
 
-    async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
-        closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
-        min_len = self.slow + self.signal
-        if len(closes) < min_len:
-            return Signal(metadata={"reason": "insufficient data"})
-
+    def _calc(self, closes: np.ndarray) -> tuple[float, float, float]:
         ema_fast = self._ema(closes, self.fast)
         ema_slow = self._ema(closes, self.slow)
         macd_line = ema_fast - ema_slow
-
-        # Drop NaN entries
         valid = ~np.isnan(macd_line)
         macd_line = macd_line[valid]
+        signal_line = self._ema(macd_line, self.signal)
+        return macd_line[-1], signal_line[-1], macd_line[-1] - signal_line[-1]
 
-        if len(macd_line) < self.signal:
+    async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
+        closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
+        min_len = self.slow + self.signal + 2
+        if len(closes) < min_len:
             return Signal(metadata={"reason": "insufficient data"})
 
-        signal_line = self._ema(macd_line, self.signal)
-        # Last valid values
-        macd_val = macd_line[-1]
-        sig_val = signal_line[-1]
-        meta: dict[str, Any] = {"macd": round(macd_val, 2), "signal": round(sig_val, 2)}
+        macd_val, sig_val, hist_val = self._calc(closes)
+        meta: dict[str, Any] = {"macd": round(macd_val, 2), "signal": round(sig_val, 2), "histogram": round(hist_val, 2)}
 
         if self._prev_macd is not None and self._prev_signal_line is not None:
             # Cross above → buy
@@ -199,16 +194,109 @@ class MACD(BaseStrategy):
         return Signal(metadata=meta)
 
 
+# ── MACD Histogram Divergence (anticipativa) ───────────────────────────────
+
+
+class MACDDivergence(BaseStrategy):
+    """MACD Histogram Divergence — anticipa el cruce 1-2 velas antes.
+
+    El histograma (MACD - señal) forma ondas como campanas de Gauss.
+    - **BUY** cuando el histograma venía subiendo (barras verdes cada vez más
+      grandes) y **empieza a encogerse** — el momentum alcista se agota,
+      el cruce a la baja está cerca.
+    - **SELL** cuando el histograma venía bajando (barras rojas cada vez más
+      grandes) y **empieza a encogerse** — el momentum bajista se agota,
+      el cruce al alza está cerca.
+
+    Esta estrategia gana 1-2 velas respecto al MACD clásico, pero es menos
+    fiable (puede haber falsos).
+
+    Esta es la única estrategia que se ejecuta en solitario (no necesita
+    majority vote).
+    """
+
+    fast: int = 12
+    slow: int = 26
+    signal: int = 9
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._prev_hist: float | None = None
+        self._prev_hist2: float | None = None  # two steps back to detect slope change
+
+    @staticmethod
+    def _ema(data: np.ndarray, period: int) -> np.ndarray:
+        result = np.empty_like(data)
+        result[:] = np.nan
+        result[period - 1] = np.mean(data[:period])
+        multiplier = 2.0 / (period + 1)
+        for i in range(period, len(data)):
+            result[i] = (data[i] - result[i - 1]) * multiplier + result[i - 1]
+        return result
+
+    def _histogram(self, closes: np.ndarray) -> float:
+        ema_fast = self._ema(closes, self.fast)
+        ema_slow = self._ema(closes, self.slow)
+        macd_line = ema_fast - ema_slow
+        valid = ~np.isnan(macd_line)
+        macd_line = macd_line[valid]
+        signal_line = self._ema(macd_line, self.signal)
+        return float(macd_line[-1] - signal_line[-1])
+
+    async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
+        closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
+        min_len = self.slow + self.signal + 3
+        if len(closes) < min_len:
+            return Signal(metadata={"reason": "insufficient data"})
+
+        hist = self._histogram(closes)
+        meta: dict[str, Any] = {"histogram": round(hist, 2)}
+
+        if self._prev_hist is not None and self._prev_hist2 is not None:
+            # We need 3 histogram values to detect a peak/trough
+            # h2 -> h1 -> hist  (h2 is oldest)
+            h2, h1 = self._prev_hist2, self._prev_hist
+
+            # --- BUY signal ---
+            # Histogram was going up (h2 <= h1) then starts shrinking (h1 > hist)
+            # AND histogram is positive (momentum still bullish but fading)
+            if h2 < h1 and hist < h1 and h1 > 0 and hist > 0:
+                confidence = min(abs(h1 - hist) / max(abs(h1), 1.0), 1.0)
+                logger.info(
+                    "MACD-DIV BUY  hist_prev={:.2f}  hist={:.2f}  conf={:.2f}",
+                    h1, hist, confidence,
+                )
+                self._prev_hist2, self._prev_hist = self._prev_hist, hist
+                return Signal(action="buy", confidence=confidence, metadata={
+                    **meta, "signal": "peak_reversal",
+                })
+
+            # --- SELL signal ---
+            # Histogram was going down (h2 >= h1) then starts shrinking up (h1 < hist)
+            # AND histogram is negative (momentum still bearish but fading)
+            if h2 > h1 and hist > h1 and h1 < 0 and hist < 0:
+                confidence = min(abs(h1 - hist) / max(abs(h1), 1.0), 1.0)
+                logger.info(
+                    "MACD-DIV SELL  hist_prev={:.2f}  hist={:.2f}  conf={:.2f}",
+                    h1, hist, confidence,
+                )
+                self._prev_hist2, self._prev_hist = self._prev_hist, hist
+                return Signal(action="sell", confidence=confidence, metadata={
+                    **meta, "signal": "trough_reversal",
+                })
+
+        self._prev_hist2, self._prev_hist = self._prev_hist, hist
+        return Signal(metadata=meta)
+
+
 # ── Strategy registry ───────────────────────────────────────────────────────
 
 STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "sma_crossover": SmaCrossover,
     "rsi": RSI,
     "macd": MACD,
+    "macd_divergence": MACDDivergence,
 }
-
-
-# ── Majority-vote meta-strategy ─────────────────────────────────────────────
 
 
 class MajorityVote(BaseStrategy):

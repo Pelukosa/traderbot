@@ -90,11 +90,12 @@ async def main_loop() -> None:
 
             # 5. Execute
             if signal.action != "hold":
-                current_price = ohlcv[-1][4]  # close price
-                await execution.execute_signal(signal, current_price)
+                current_price = float(ohlcv[-1][4])  # close price
+                logger.info("EXECUTING {} @ {:.2f} — conf={:.2f}", signal.action.upper(), current_price, signal.confidence)
+                await execution.execute_signal(signal, current_price, strategy_name=strategy.name)
 
-            # Yield control — let the event loop breathe
-            await asyncio.sleep(0.1)
+            # Sleep 60s — check every new 1m candle
+            await asyncio.sleep(45)
 
     except asyncio.CancelledError:
         logger.info("Shutdown requested")

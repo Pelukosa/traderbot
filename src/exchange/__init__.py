@@ -79,6 +79,20 @@ class ExchangeManager:
             self._exchange.create_limit_sell_order, symbol, amount, price
         )
 
+    async def create_market_buy_order(
+        self, symbol: str, amount: float
+    ) -> dict[str, Any]:
+        return await self._safe_call(
+            self._exchange.create_market_buy_order, symbol, amount
+        )
+
+    async def create_market_sell_order(
+        self, symbol: str, amount: float
+    ) -> dict[str, Any]:
+        return await self._safe_call(
+            self._exchange.create_market_sell_order, symbol, amount
+        )
+
     async def cancel_all_orders(self, symbol: str) -> list[dict[str, Any]]:
         return await self._safe_call(
             self._exchange.cancel_all_orders, symbol

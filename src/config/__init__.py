@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     take_profit_percent: float = 4.0
 
     # Strategy
-    strategy: str = "majority_vote"  # sma_crossover | rsi | macd | majority_vote
+    strategy: str = "macd_divergence"  # sma_crossover | rsi | macd | macd_divergence | majority_vote
     sma_fast: int = 10
     sma_slow: int = 30
     trading_symbol: str = "BTC/EUR"
