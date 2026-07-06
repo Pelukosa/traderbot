@@ -96,35 +96,26 @@ def format_message(event: BotEvent) -> str:
 
 
 def send_whatsapp(text: str) -> bool:
-    """Send a WhatsApp message using the Hermes CLI or API."""
+    """Send a WhatsApp message using the Hermes send_message tool."""
     if not NOTIFY_ENABLED:
         logger.debug("Notifications disabled — would send: {}", text[:80])
         return False
 
     try:
-        # Try using hermes send_message CLI
+        # Import Hermes send_message tool dynamically
+        import json as _json
         result = subprocess.run(
-            [sys.executable, "-m", "hermes", "send_message", NOTIFY_CHAT, text],
-            capture_output=True, text=True, timeout=10,
+            ["hermes", "send_message", NOTIFY_CHAT, text],
+            capture_output=True, text=True, timeout=15,
         )
         if result.returncode == 0:
             logger.info("WhatsApp notification sent")
             return True
         else:
-            logger.warning("WhatsApp send failed: {}", result.stderr[:200])
+            logger.warning("WhatsApp send failed: {}", result.stderr[:300])
             return False
     except FileNotFoundError:
-        # Fallback: try the Hermes tool directly
-        try:
-            result = subprocess.run(
-                ["hermes", "send", NOTIFY_CHAT, text],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0:
-                return True
-        except Exception:
-            pass
-        logger.warning("Hermes CLI not available — notification not sent")
+        logger.warning("Hermes CLI not found — notification not sent")
         return False
     except Exception as e:
         logger.warning("Failed to send notification: {}", e)

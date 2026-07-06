@@ -11,7 +11,6 @@ from loguru import logger
 
 from src.config import settings
 from src.exchange import ExchangeManager
-from src.logger import get_safe_logger
 from src.notifications import notify_buy, notify_sell, notify_sl
 from src.logger.trades import log_trade
 from src.logger.performance import log_strategy_trade

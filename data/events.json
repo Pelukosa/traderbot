@@ -1,0 +1,20 @@
+[
+  {
+    "type": "startup",
+    "message": "Bot iniciado \u2014 modo LIVE",
+    "timestamp": "2026-07-06T23:40:11.989919+00:00",
+    "price": null,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "heartbeat",
+    "message": "\u26aa ESPERANDO SE\u00d1AL",
+    "timestamp": "2026-07-06T23:40:21.890757+00:00",
+    "price": 55988.5,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  }
+]
