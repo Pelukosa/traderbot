@@ -44,6 +44,23 @@ async def main_loop() -> None:
         await exchange.load_markets()
         logger.info("Markets loaded — connected to {}", settings.exchange_id)
 
+        # ── Restore position on restart ──
+        # Check if we already have BTC (position from a previous run)
+        try:
+            bal = await exchange.fetch_balance()
+            base = settings.trading_symbol.split("/")[0]
+            btc_free = float(bal.get(base, {}).get("free", 0))
+            eur_free = float(bal.get("EUR", {}).get("free", 0))
+            logger.info("Restore check — {}: {:.8f}  EUR: {:.2f}", base, btc_free, eur_free)
+            if btc_free >= 0.00001:
+                # We're already in position — don't buy until we sell
+                execution.set_in_position(btc_free)
+                logger.info("Position restored — {} BTC @ market, waiting for sell signal", btc_free)
+            else:
+                logger.info("No position found — ready to buy")
+        except Exception:
+            logger.warning("Could not fetch balance for position restore — starting fresh")
+
         # Warm-up: fetch enough candles for the strategy windows
         ohlcv = await exchange.fetch_ohlcv(
             settings.trading_symbol, timeframe="1m", limit=100

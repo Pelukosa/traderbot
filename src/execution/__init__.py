@@ -71,6 +71,21 @@ class ExecutionManager:
     def in_position(self) -> bool:
         return self._position is not None and self._position.active
 
+    def set_in_position(self, btc_amount: float) -> None:
+        """Restore a position after restart (buy already happened)."""
+        price = 0.0  # unknown — will use actual sell price at close
+        self._position = Position(
+            symbol=settings.trading_symbol,
+            side="long",
+            entry_price=price,
+            amount=btc_amount,
+            stop_loss=None,
+            take_profit=None,
+            highest_price=0.0,
+            entry_time=datetime.now(timezone.utc),
+        )
+        logger.info("Position restored — {:.8f} BTC, waiting for sell signal", btc_amount)
+
     def _simulate_only(self) -> bool:
         return settings.risk_mode == "simulation"
 
@@ -135,7 +150,11 @@ class ExecutionManager:
 
             size = invest_eur / price
             logger.info("Investing {:.2f}€ → {:.6f} BTC @ {:.2f}", invest_eur, size, price)
-            await self._open_long(symbol, size, price, eur_free)
+            try:
+                await self._open_long(symbol, size, price, eur_free)
+            except OrderError as e:
+                logger.error("Buy execution failed (will retry on next signal): {}", e)
+                self._trade_ctx = None
 
         elif signal.action == "sell" and self.in_position:
             await self._close_position(symbol, ohlcv)
@@ -169,25 +188,31 @@ class ExecutionManager:
             log_trade("buy", symbol, amount, price, 0.0, balance_eur=eur_free)
         else:
             try:
-                order = await self._exchange.create_market_buy_order(symbol, amount)
-                if order is None:
+                raw = await self._exchange.safe_call(
+                    self._exchange.exchange.create_order,
+                    symbol, "market", "buy", amount,
+                )
+                logger.info("RAW ORDER RESPONSE: {}", raw)
+                if raw is None:
                     logger.error("Kraken returned None order — insufficient funds or rate limit")
                     return
-                logger.info("ORDER PLACED: {}", order)
-                if not isinstance(order, dict):
-                    logger.error("Unexpected order response type: {}", type(order))
+                if not isinstance(raw, dict):
+                    logger.error("Unexpected order response type: {} — {}", type(raw), raw)
                     return
-                fills = order.get("fills", [])
+                # Kraken wraps result in result/txid structure
+                info = raw.get("info") or raw
+                order_id = raw.get("id", "") or (info.get("txid", [""])[0] if isinstance(info.get("txid"), list) else "")
+                fills = raw.get("fills", []) or info.get("fills", [])
                 if fills:
                     avg_price = sum(f["price"] * f["amount"] for f in fills) / sum(f["amount"] for f in fills)
                     total_fee = sum(f.get("fee", {}).get("cost", 0) for f in fills)
                     filled_amount = sum(f["amount"] for f in fills)
                 else:
-                    avg_price = float(order.get("price") or price)
-                    total_fee = float(order.get("fee", {}).get("cost", 0))
-                    filled_amount = float(order.get("filled", amount))
+                    avg_price = float(raw.get("price") or info.get("price", price))
+                    total_fee = float(raw.get("fee", {}).get("cost", 0) or info.get("fee", 0))
+                    filled_amount = float(raw.get("filled", amount) or info.get("filled", amount))
                 log_trade("buy", symbol, filled_amount, avg_price, total_fee,
-                          order_id=order.get("id", ""), balance_eur=eur_free)
+                          order_id=order_id, balance_eur=eur_free)
                 amount = filled_amount
                 price = avg_price
                 # Update buy price in trade context with real fill
