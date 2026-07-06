@@ -180,13 +180,13 @@ class ExecutionManager:
             await self._check_exits(price)
 
     async def _open_long(self, symbol: str, amount: float, price: float, eur_free: float = 0.0) -> None:
-        # SL fijo al 1%
-        sl = price * 0.99
+        # SL fijo 4.95% (optimizado para MACD+RSI<30 en 1h)
+        sl = price * 0.9505
 
-        # Sin TP fijo — trailing TP lo gestiona (mín 1%)
+        # Sin TP fijo — trailing TP lo gestiona (mín 1.05%)
         tp = None
 
-        logger.info("SL fijo: 1.00% -> {:.2f}", sl)
+        logger.info("SL: 4.95% -> {:.2f}", sl)
 
         if self._simulate_only():
             logger.info(
@@ -377,11 +377,11 @@ class ExecutionManager:
         pos = self._position
         now = datetime.now(timezone.utc)
 
-        # ── 1. Trailing stop-loss (asegurar ganancias desde 1%) ──
+        # ── 1. Trailing stop-loss (asegurar ganancias desde 1.05%) ──
         if current_price > pos.highest_price and pos.entry_price > 1:
             pos.highest_price = current_price
             gain_pct = (current_price - pos.entry_price) / pos.entry_price * 100
-            if gain_pct > 1.0:  # trailing solo si ha subido al menos 1%
+            if gain_pct > 1.05:  # trailing solo si ha subido al menos 1.05%
                 trail_pct = gain_pct * 0.6  # retiene el 60% de la ganancia
                 new_sl = pos.entry_price * (1 + trail_pct / 100.0)
                 if pos.stop_loss is None or new_sl > pos.stop_loss:

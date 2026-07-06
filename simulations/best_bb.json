@@ -1,0 +1,217 @@
+{
+  "strategy": "Bollinger Bands",
+  "strategy_id": "bb",
+  "iterations": 3000,
+  "results": [
+    {
+      "config": {
+        "bb_lookback": 3,
+        "sl_percent": 2.25,
+        "trailing_min_gain": 4.67,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 423.93,
+        "total_fees": 0.0,
+        "final_balance": 5423.93,
+        "roi": 8.48,
+        "avg_pnl": 30.28,
+        "score": 8.48
+      },
+      "score": 8.48
+    },
+    {
+      "config": {
+        "bb_lookback": 2,
+        "sl_percent": 2.27,
+        "trailing_min_gain": 4.08,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 423.93,
+        "total_fees": 0.0,
+        "final_balance": 5423.93,
+        "roi": 8.48,
+        "avg_pnl": 30.28,
+        "score": 8.48
+      },
+      "score": 8.48
+    },
+    {
+      "config": {
+        "bb_lookback": 3,
+        "sl_percent": 2.37,
+        "trailing_min_gain": 2.55,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 423.93,
+        "total_fees": 0.0,
+        "final_balance": 5423.93,
+        "roi": 8.48,
+        "avg_pnl": 30.28,
+        "score": 8.48
+      },
+      "score": 8.48
+    },
+    {
+      "config": {
+        "bb_lookback": 3,
+        "sl_percent": 1.86,
+        "trailing_min_gain": 3.7,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 423.93,
+        "total_fees": 0.0,
+        "final_balance": 5423.93,
+        "roi": 8.48,
+        "avg_pnl": 30.28,
+        "score": 8.48
+      },
+      "score": 8.48
+    },
+    {
+      "config": {
+        "bb_lookback": 5,
+        "sl_percent": 2.24,
+        "trailing_min_gain": 4.56,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 423.93,
+        "total_fees": 0.0,
+        "final_balance": 5423.93,
+        "roi": 8.48,
+        "avg_pnl": 30.28,
+        "score": 8.48
+      },
+      "score": 8.48
+    },
+    {
+      "config": {
+        "bb_lookback": 4,
+        "sl_percent": 1.97,
+        "trailing_min_gain": 1.36,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 9,
+        "losses": 5,
+        "win_rate": 64.3,
+        "total_pnl": 417.36,
+        "total_fees": 0.0,
+        "final_balance": 5417.36,
+        "roi": 8.35,
+        "avg_pnl": 29.81,
+        "score": 8.35
+      },
+      "score": 8.35
+    },
+    {
+      "config": {
+        "bb_lookback": 5,
+        "sl_percent": 2.94,
+        "trailing_min_gain": 0.56,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 9,
+        "losses": 5,
+        "win_rate": 64.3,
+        "total_pnl": 390.75,
+        "total_fees": 0.0,
+        "final_balance": 5390.75,
+        "roi": 7.81,
+        "avg_pnl": 27.91,
+        "score": 7.81
+      },
+      "score": 7.81
+    },
+    {
+      "config": {
+        "bb_lookback": 3,
+        "sl_percent": 1.72,
+        "trailing_min_gain": 0.84,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 389.39,
+        "total_fees": 0.0,
+        "final_balance": 5389.39,
+        "roi": 7.79,
+        "avg_pnl": 27.81,
+        "score": 7.79
+      },
+      "score": 7.79
+    },
+    {
+      "config": {
+        "bb_lookback": 5,
+        "sl_percent": 3.04,
+        "trailing_min_gain": 1.96,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 389.17,
+        "total_fees": 0.0,
+        "final_balance": 5389.17,
+        "roi": 7.78,
+        "avg_pnl": 27.8,
+        "score": 7.78
+      },
+      "score": 7.78
+    },
+    {
+      "config": {
+        "bb_lookback": 5,
+        "sl_percent": 2.81,
+        "trailing_min_gain": 2.1,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 10,
+        "losses": 4,
+        "win_rate": 71.4,
+        "total_pnl": 389.17,
+        "total_fees": 0.0,
+        "final_balance": 5389.17,
+        "roi": 7.78,
+        "avg_pnl": 27.8,
+        "score": 7.78
+      },
+      "score": 7.78
+    }
+  ]
+}

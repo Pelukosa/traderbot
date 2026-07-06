@@ -29,6 +29,9 @@ from src.strategy import Signal
 TIMEFRAME = "1h"
 FAST_TICK = 5 * 60  # 5 min for sell/trailing/SL checks
 
+# ── Estrategia actual ──
+STRATEGY_NAME = "macd_rsi_filtro"
+
 
 async def main_loop() -> None:
     setup_logger()
@@ -36,9 +39,9 @@ async def main_loop() -> None:
                 settings.risk_mode, TIMEFRAME, FAST_TICK)
 
     exchange = ExchangeManager()
-    strategy_cls = STRATEGY_REGISTRY.get(settings.strategy)
+    strategy_cls = STRATEGY_REGISTRY.get(STRATEGY_NAME)
     if strategy_cls is None:
-        logger.error("Unknown strategy: {}", settings.strategy)
+        logger.error("Unknown strategy: {}", STRATEGY_NAME)
         sys.exit(1)
 
     strategy = strategy_cls()

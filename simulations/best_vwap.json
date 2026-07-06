@@ -1,0 +1,227 @@
+{
+  "strategy": "VWAP",
+  "strategy_id": "vwap",
+  "iterations": 3000,
+  "results": [
+    {
+      "config": {
+        "vwap_buy": -4.62,
+        "vwap_sell": 1.35,
+        "sl_percent": 2.75,
+        "trailing_min_gain": 1.72,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 7,
+        "wins": 7,
+        "losses": 0,
+        "win_rate": 100.0,
+        "total_pnl": 573.6,
+        "total_fees": 0.0,
+        "final_balance": 5573.6,
+        "roi": 11.47,
+        "avg_pnl": 81.94,
+        "score": 11.47
+      },
+      "score": 11.47
+    },
+    {
+      "config": {
+        "vwap_buy": -2.24,
+        "vwap_sell": 2.21,
+        "sl_percent": 1.74,
+        "trailing_min_gain": 0.91,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 20,
+        "wins": 15,
+        "losses": 5,
+        "win_rate": 75.0,
+        "total_pnl": 569.97,
+        "total_fees": 0.0,
+        "final_balance": 5569.97,
+        "roi": 11.4,
+        "avg_pnl": 28.5,
+        "score": 11.4
+      },
+      "score": 11.4
+    },
+    {
+      "config": {
+        "vwap_buy": -4.38,
+        "vwap_sell": 3.84,
+        "sl_percent": 1.55,
+        "trailing_min_gain": 2.01,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 9,
+        "wins": 8,
+        "losses": 1,
+        "win_rate": 88.9,
+        "total_pnl": 602.59,
+        "total_fees": 9.19,
+        "final_balance": 5598.02,
+        "roi": 11.96,
+        "avg_pnl": 66.95,
+        "score": 11.04
+      },
+      "score": 11.04
+    },
+    {
+      "config": {
+        "vwap_buy": -4.93,
+        "vwap_sell": 1.03,
+        "sl_percent": 3.62,
+        "trailing_min_gain": 1.66,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 7,
+        "wins": 7,
+        "losses": 0,
+        "win_rate": 100.0,
+        "total_pnl": 538.28,
+        "total_fees": 0.0,
+        "final_balance": 5538.28,
+        "roi": 10.77,
+        "avg_pnl": 76.9,
+        "score": 10.77
+      },
+      "score": 10.77
+    },
+    {
+      "config": {
+        "vwap_buy": -4.86,
+        "vwap_sell": 3.95,
+        "sl_percent": 2.74,
+        "trailing_min_gain": 2.55,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 7,
+        "wins": 7,
+        "losses": 0,
+        "win_rate": 100.0,
+        "total_pnl": 569.78,
+        "total_fees": 7.12,
+        "final_balance": 5566.25,
+        "roi": 11.32,
+        "avg_pnl": 81.4,
+        "score": 10.61
+      },
+      "score": 10.61
+    },
+    {
+      "config": {
+        "vwap_buy": -4.74,
+        "vwap_sell": 0.74,
+        "sl_percent": 1.54,
+        "trailing_min_gain": 2.77,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 7,
+        "wins": 7,
+        "losses": 0,
+        "win_rate": 100.0,
+        "total_pnl": 569.78,
+        "total_fees": 7.12,
+        "final_balance": 5566.25,
+        "roi": 11.32,
+        "avg_pnl": 81.4,
+        "score": 10.61
+      },
+      "score": 10.61
+    },
+    {
+      "config": {
+        "vwap_buy": -4.85,
+        "vwap_sell": 2.45,
+        "sl_percent": 4.91,
+        "trailing_min_gain": 1.76,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 7,
+        "wins": 7,
+        "losses": 0,
+        "win_rate": 100.0,
+        "total_pnl": 569.78,
+        "total_fees": 7.12,
+        "final_balance": 5566.25,
+        "roi": 11.32,
+        "avg_pnl": 81.4,
+        "score": 10.61
+      },
+      "score": 10.61
+    },
+    {
+      "config": {
+        "vwap_buy": -4.16,
+        "vwap_sell": 4.35,
+        "sl_percent": 3.4,
+        "trailing_min_gain": 3.08,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 9,
+        "wins": 8,
+        "losses": 1,
+        "win_rate": 88.9,
+        "total_pnl": 572.78,
+        "total_fees": 9.09,
+        "final_balance": 5568.27,
+        "roi": 11.37,
+        "avg_pnl": 63.64,
+        "score": 10.46
+      },
+      "score": 10.46
+    },
+    {
+      "config": {
+        "vwap_buy": -4.14,
+        "vwap_sell": 2.12,
+        "sl_percent": 2.72,
+        "trailing_min_gain": 2.56,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 9,
+        "wins": 8,
+        "losses": 1,
+        "win_rate": 88.9,
+        "total_pnl": 572.78,
+        "total_fees": 9.09,
+        "final_balance": 5568.27,
+        "roi": 11.37,
+        "avg_pnl": 63.64,
+        "score": 10.46
+      },
+      "score": 10.46
+    },
+    {
+      "config": {
+        "vwap_buy": -4.27,
+        "vwap_sell": 4.29,
+        "sl_percent": 1.8,
+        "trailing_min_gain": 3.09,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 9,
+        "wins": 8,
+        "losses": 1,
+        "win_rate": 88.9,
+        "total_pnl": 518.45,
+        "total_fees": 0.0,
+        "final_balance": 5518.45,
+        "roi": 10.37,
+        "avg_pnl": 57.61,
+        "score": 10.37
+      },
+      "score": 10.37
+    }
+  ]
+}

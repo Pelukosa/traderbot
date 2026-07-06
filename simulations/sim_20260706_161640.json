@@ -1,0 +1,152 @@
+{
+  "config": {
+    "fast": 12,
+    "slow": 26,
+    "signal": 9,
+    "confirm_velas": 2,
+    "min_histogram_abs": 70.0,
+    "sl_percent": 3.0,
+    "trail_retain": 0.6,
+    "trailing_min_gain": 2.0,
+    "invest_percent": 95.0,
+    "max_position_hours": 6,
+    "min_balance_eur": 5.0,
+    "fee_percent": 0.26,
+    "initial_eur": 125.0
+  },
+  "trades": [
+    {
+      "buy_time": "2026-06-09T04:00:00+00:00",
+      "buy_price": 54776.8,
+      "sell_time": "2026-06-09T15:00:00+00:00",
+      "sell_price": 52886.0,
+      "sell_reason": "stop_loss",
+      "duration_hours": 0.0,
+      "pnl_eur": -4.1,
+      "net_pnl_eur": -4.4,
+      "pnl_pct": -3.45
+    },
+    {
+      "buy_time": "2026-06-09T18:00:00+00:00",
+      "buy_price": 53461.9,
+      "sell_time": "2026-06-10T19:00:00+00:00",
+      "sell_price": 53624.8,
+      "sell_reason": "signal",
+      "duration_hours": 0.01,
+      "pnl_eur": 0.35,
+      "net_pnl_eur": 0.05,
+      "pnl_pct": 0.3
+    },
+    {
+      "buy_time": "2026-06-12T10:00:00+00:00",
+      "buy_price": 54984.7,
+      "sell_time": "2026-06-15T04:00:00+00:00",
+      "sell_price": 56553.7,
+      "sell_reason": "signal",
+      "duration_hours": 0.02,
+      "pnl_eur": 3.25,
+      "net_pnl_eur": 2.95,
+      "pnl_pct": 2.85
+    },
+    {
+      "buy_time": "2026-06-16T05:00:00+00:00",
+      "buy_price": 57040.5,
+      "sell_time": "2026-06-17T22:00:00+00:00",
+      "sell_price": 55844.7,
+      "sell_reason": "signal",
+      "duration_hours": 0.01,
+      "pnl_eur": -2.44,
+      "net_pnl_eur": -2.74,
+      "pnl_pct": -2.1
+    },
+    {
+      "buy_time": "2026-06-18T20:00:00+00:00",
+      "buy_price": 55006.3,
+      "sell_time": "2026-06-19T19:00:00+00:00",
+      "sell_price": 54876.5,
+      "sell_reason": "signal",
+      "duration_hours": 0.01,
+      "pnl_eur": -0.27,
+      "net_pnl_eur": -0.56,
+      "pnl_pct": -0.24
+    },
+    {
+      "buy_time": "2026-06-22T02:00:00+00:00",
+      "buy_price": 55982.9,
+      "sell_time": "2026-06-22T14:00:00+00:00",
+      "sell_price": 56728.4,
+      "sell_reason": "stop_loss",
+      "duration_hours": 0.0,
+      "pnl_eur": 1.5,
+      "net_pnl_eur": 1.21,
+      "pnl_pct": 1.33
+    },
+    {
+      "buy_time": "2026-06-23T02:00:00+00:00",
+      "buy_price": 56139.3,
+      "sell_time": "2026-06-24T05:00:00+00:00",
+      "sell_price": 55247.7,
+      "sell_reason": "signal",
+      "duration_hours": 0.01,
+      "pnl_eur": -1.81,
+      "net_pnl_eur": -2.1,
+      "pnl_pct": -1.59
+    },
+    {
+      "buy_time": "2026-06-24T21:00:00+00:00",
+      "buy_price": 53730.5,
+      "sell_time": "2026-06-25T11:00:00+00:00",
+      "sell_price": 53974.7,
+      "sell_reason": "signal",
+      "duration_hours": 0.0,
+      "pnl_eur": 0.51,
+      "net_pnl_eur": 0.22,
+      "pnl_pct": 0.45
+    },
+    {
+      "buy_time": "2026-06-25T19:00:00+00:00",
+      "buy_price": 52084.5,
+      "sell_time": "2026-06-26T11:00:00+00:00",
+      "sell_price": 52052.6,
+      "sell_reason": "signal",
+      "duration_hours": 0.0,
+      "pnl_eur": -0.07,
+      "net_pnl_eur": -0.36,
+      "pnl_pct": -0.06
+    },
+    {
+      "buy_time": "2026-06-29T01:00:00+00:00",
+      "buy_price": 52126.8,
+      "sell_time": "2026-07-01T08:00:00+00:00",
+      "sell_price": 51684.3,
+      "sell_reason": "signal",
+      "duration_hours": 0.02,
+      "pnl_eur": -0.94,
+      "net_pnl_eur": -1.23,
+      "pnl_pct": -0.85
+    },
+    {
+      "buy_time": "2026-07-03T07:00:00+00:00",
+      "buy_price": 53853.8,
+      "sell_time": "2026-07-05T09:00:00+00:00",
+      "sell_price": 54742.2,
+      "sell_reason": "stop_loss",
+      "duration_hours": 0.01,
+      "pnl_eur": 1.8,
+      "net_pnl_eur": 1.51,
+      "pnl_pct": 1.65
+    }
+  ],
+  "summary": {
+    "trades": 11,
+    "wins": 5,
+    "losses": 6,
+    "win_rate": 45.5,
+    "total_fees": 6.77,
+    "total_pnl_bruto": -2.21,
+    "total_pnl_neto": -5.45,
+    "initial_eur": 125.0,
+    "final_eur": 116.02,
+    "roi_pct": -7.18
+  }
+}

@@ -365,13 +365,180 @@ class MACDDivergence(BaseStrategy):
         return Signal(metadata=meta)
 
 
-# ── Strategy registry ───────────────────────────────────────────────────────
+# ── MACD Valley + RSI < umbral (híbrida) ─────────────────────────
+
+
+class MACDRSIFiltro(BaseStrategy):
+    """MACD Histogram Valley con filtro RSI.
+
+    Compra: cuando el histograma del MACD detecta un VALLE
+            (cambio de tendencia bajista a alcista) **Y** el RSI < rsi_max
+            (sobreventa). Ambas condiciones deben cumplirse.
+
+    Vende: cuando el histograma detecta un PICO, o por SL/trailing/max time.
+
+    Parámetros:
+        min_histogram_abs: |histograma| mínimo en el valle para operar (60)
+        rsi_max: RSI máximo para permitir compra (40)
+        confirm_velas: velas de confirmación tras el valle/pico (1)
+        sl_percent: stop-loss fijo (4.95%)
+        trailing_min_gain: % mínimo para activar trailing (1.05%)
+        trail_retain: fracción de ganancia retenida (0.6)
+    """
+
+    fast: int = 12
+    slow: int = 26
+    signal: int = 9
+    confirm_velas: int = 1
+    min_histogram_abs: float = 60.0
+    rsi_max: float = 40.0
+    sl_percent: float = 4.95
+    trailing_min_gain: float = 1.05
+    trail_retain: float = 0.6
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._hist_buffer: list[float] = []
+        self._awaiting_action: str | None = None
+        self._confirm_count: int = 0
+        self._detected_valley: float | None = None
+        self._detected_peak: float | None = None
+
+    @staticmethod
+    def _ema(data: np.ndarray, period: int) -> np.ndarray:
+        result = np.empty_like(data)
+        result[:] = np.nan
+        result[period - 1] = np.mean(data[:period])
+        multiplier = 2.0 / (period + 1)
+        for i in range(period, len(data)):
+            result[i] = (data[i] - result[i - 1]) * multiplier + result[i - 1]
+        return result
+
+    @staticmethod
+    def _compute_rsi(closes: np.ndarray, period: int = 14) -> float:
+        deltas = np.diff(closes)
+        gains = deltas.copy()
+        losses = deltas.copy()
+        gains[gains < 0] = 0.0
+        losses[losses > 0] = 0.0
+        losses = -losses
+        avg_gain = np.mean(gains[-period:]) if len(gains) >= period else 0
+        avg_loss = np.mean(losses[-period:]) if len(losses) >= period else 0
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    def _histogram(self, closes: np.ndarray) -> float:
+        ema_fast = self._ema(closes, self.fast)
+        ema_slow = self._ema(closes, self.slow)
+        macd_line_arr = ema_fast - ema_slow
+        valid = ~np.isnan(macd_line_arr)
+        macd_line_arr = macd_line_arr[valid]
+        signal_line = self._ema(macd_line_arr, self.signal)
+        return float(macd_line_arr[-1] - signal_line[-1])
+
+    async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
+        closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
+        min_len = self.slow + self.signal + 5
+        if len(closes) < min_len:
+            return Signal(metadata={"reason": "insufficient data"})
+
+        hist = self._histogram(closes)
+        rsi = self._compute_rsi(closes)
+        self._hist_buffer.append(hist)
+        if len(self._hist_buffer) > 5:
+            self._hist_buffer = self._hist_buffer[-5:]
+
+        meta: dict[str, Any] = {
+            "histogram": round(hist, 2),
+            "rsi": round(rsi, 2),
+            "buffer": [round(h, 2) for h in self._hist_buffer],
+        }
+
+        if len(self._hist_buffer) < 4:
+            return Signal(metadata=meta)
+
+        h = self._hist_buffer
+
+        # ── Check confirmation ──
+        if self._awaiting_action:
+            self._confirm_count += 1
+            if self._confirm_count >= self.confirm_velas:
+                action = self._awaiting_action
+                signal_type = "valley_confirmed" if action == "buy" else "peak_confirmed"
+                confidence = min(
+                    abs(h[-1] - h[-2]) / max(abs(h[-1]), 1.0), 1.0
+                ) + 0.3
+                confidence = min(confidence, 1.0)
+
+                if action == "buy" and self._detected_valley is not None:
+                    meta["valley_value"] = round(self._detected_valley, 2)
+                elif action == "sell" and self._detected_peak is not None:
+                    meta["peak_value"] = round(self._detected_peak, 2)
+
+                self._detected_valley = None
+                self._detected_peak = None
+                self._awaiting_action = None
+                self._confirm_count = 0
+
+                logger.info(
+                    "MACD-RSI {}  hist={:.2f}  rsi={:.2f}  conf={:.2f}",
+                    action.upper(), hist, rsi, confidence,
+                )
+                return Signal(action=action, confidence=confidence, metadata={
+                    **meta, "signal": signal_type,
+                })
+            else:
+                return Signal(metadata={**meta, "confirming": self._awaiting_action, "count": self._confirm_count})
+
+        # ── VALLE detection (buy) ──
+        if h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and h[-1] < 0 and abs(h[-2]) >= self.min_histogram_abs:
+            if rsi < self.rsi_max:
+                self._detected_valley = h[-2]
+                self._awaiting_action = "buy"
+                self._confirm_count = 1
+                logger.info(
+                    "MACD-RSI VALLE+RSI<{}  hist={:.2f}  bottom={:.2f}  rsi={:.2f}  esperando {} velas…",
+                    self.rsi_max, hist, h[-2], rsi, self.confirm_velas,
+                )
+                return Signal(metadata={
+                    **meta, "signal": "valley_rsi_detected",
+                    "valley_value": round(h[-2], 2),
+                    "confirming": "buy", "count": 1,
+                })
+            else:
+                logger.debug(
+                    "MACD valley detected but RSI={:.1f} >= {:.1f} — skipping buy",
+                    rsi, self.rsi_max,
+                )
+
+        # ── PICO detection (sell) ──
+        if h[-4] <= h[-3] < h[-2] > h[-1] and h[-2] > 0 and h[-1] > 0 and abs(h[-2]) >= self.min_histogram_abs:
+            self._detected_peak = h[-2]
+            self._awaiting_action = "sell"
+            self._confirm_count = 1
+            logger.info(
+                "MACD-RSI PICO  hist={:.2f}  peak={:.2f}  rsi={:.2f}  esperando {} velas…",
+                hist, h[-2], rsi, self.confirm_velas,
+            )
+            return Signal(metadata={
+                **meta, "signal": "peak_detected",
+                "peak_value": round(h[-2], 2),
+                "confirming": "sell", "count": 1,
+            })
+
+        return Signal(metadata=meta)
+
+
+# ── Strategy registry (add MACDRSIFiltro) ────────────────────────────────────
 
 STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "sma_crossover": SmaCrossover,
     "rsi": RSI,
     "macd": MACD,
     "macd_divergence": MACDDivergence,
+    "macd_rsi_filtro": MACDRSIFiltro,
 }
 
 

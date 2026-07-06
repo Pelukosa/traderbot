@@ -1,0 +1,30 @@
+{
+  "config": {
+    "fast": 12,
+    "slow": 26,
+    "signal": 9,
+    "confirm_velas": 1,
+    "min_histogram_abs": 50.0,
+    "sl_percent": 1.0,
+    "trail_retain": 0.6,
+    "trailing_min_gain": 1.0,
+    "invest_percent": 95.0,
+    "max_position_hours": 6,
+    "min_balance_eur": 5.0,
+    "fee_percent": 0.26,
+    "initial_eur": 125.0
+  },
+  "trades": [],
+  "summary": {
+    "trades": 0,
+    "wins": 0,
+    "losses": 0,
+    "win_rate": 0,
+    "total_fees": 0.0,
+    "total_pnl_bruto": 0,
+    "total_pnl_neto": 0,
+    "initial_eur": 125.0,
+    "final_eur": 125.0,
+    "roi_pct": 0.0
+  }
+}
