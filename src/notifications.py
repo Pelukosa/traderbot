@@ -1,14 +1,13 @@
 """
-Notificaciones vía WhatsApp para eventos del bot.
+Notificaciones vía Gotify para eventos del bot.
 
-Usa el webhook de Hermes para enviar mensajes a través de WhatsApp.
 Se llama desde el execution manager en cada compra/venta/error/startup.
+Además escribe a data/events.json para el cron de respaldo.
 """
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
+import urllib.request
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,14 +15,35 @@ from typing import Any
 
 from loguru import logger
 
-# ── Config ──
-# Se puede sobrescribir con variables de entorno
-HERMES_CLI = "/opt/data/home/.local/bin/hermes"
-NOTIFY_CHAT = "whatsapp:89064904589410@lid"  # DM directo a Alejandro
-NOTIFY_ENABLED = True
+# ── Gotify ──
+GOTIFY_URL = "http://192.168.1.6:8492"
+GOTIFY_TOKEN = "AnKlAMgG66v.vmf"
 
-# Fichero de eventos para persistencia
+# ── Event file (backup / cron) ──
 EVENTS_FILE = Path(__file__).parent.parent / "data/events.json"
+
+PRIORITIES = {
+    "buy": 5,
+    "sell": 5,
+    "sl": 8,
+    "error": 10,
+    "startup": 3,
+    "shutdown": 3,
+    "trailing": 4,
+    "heartbeat": 2,
+}
+
+EMOJIS = {
+    "buy": "🟢",
+    "sell": "🔴",
+    "sl": "⛔",
+    "trailing": "📈",
+    "error": "🚨",
+    "startup": "🤖",
+    "shutdown": "💤",
+    "signal": "📊",
+    "heartbeat": "💓",
+}
 
 
 @dataclass
@@ -45,74 +65,71 @@ def _save_event(event: BotEvent):
         if EVENTS_FILE.exists():
             events = json.loads(EVENTS_FILE.read_text())
         events.append(asdict(event))
-        # Keep last 100
         EVENTS_FILE.write_text(json.dumps(events[-100:], indent=2))
     except Exception:
         pass
 
 
-def _emoji(event_type: str) -> str:
-    return {
-        "buy": "🟢",
-        "sell": "🔴",
-        "sl": "⛔",
-        "trailing": "📈",
-        "error": "🚨",
-        "startup": "🤖",
-        "shutdown": "💤",
-        "signal": "📊",
-        "heartbeat": "💓",
-    }.get(event_type, "ℹ️")
+def _send_gotify(title: str, message: str, priority: int = 5) -> bool:
+    payload = json.dumps({
+        "title": title,
+        "message": message,
+        "priority": priority,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{GOTIFY_URL}/message?token={GOTIFY_TOKEN}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        return True
+    except Exception as e:
+        logger.warning("Gotify send failed: {}", e)
+        return False
 
 
-def format_message(event: BotEvent) -> str:
-    """Format a BotEvent as a concise WhatsApp message."""
-    e = _emoji(event.type)
-    lines = [f"{e} *{event.type.upper()}*"]
+def _format_event(event: BotEvent) -> tuple[str, str, int]:
+    """Returns (title, message, priority)."""
+    etype = event.type
+    emoji = EMOJIS.get(etype, "ℹ️")
+    priority = PRIORITIES.get(etype, 5)
+    title = f"{emoji} {etype.upper()}"
 
+    lines = []
     if event.message:
-        lines.append(f"📝 {event.message}")
-
+        lines.append(event.message)
     if event.price is not None:
-        lines.append(f"💰 Precio: {event.price:.2f}€")
-
+        lines.append(f"💰 {event.price:.2f}€")
     if event.pnl is not None:
         sign = "+" if event.pnl >= 0 else ""
         lines.append(f"📊 PnL: {sign}{event.pnl:.2f}€")
-
     if event.balance is not None:
-        lines.append(f"🏦 Balance: {event.balance:.2f}€")
-
+        lines.append(f"🏦 {event.balance:.2f}€")
     if event.details:
         for k, v in event.details.items():
             if isinstance(v, float):
                 lines.append(f"   {k}: {v:.2f}")
             else:
                 lines.append(f"   {k}: {v}")
+    t = event.timestamp
+    if t:
+        lines.append(f"🕐 {t[11:16] if len(t) > 16 else t}")
 
-    t = datetime.fromisoformat(event.timestamp)
-    lines.append(f"🕐 {t.strftime('%H:%M:%S')}")
-
-    return "\n".join(lines)
-
-
-def send_whatsapp(text: str) -> bool:
-    """WhatsApp delivery handled by cron job (enviar_eventos.py every 3m).
-
-    This function is a no-op — the bot writes events to data/events.json
-    and the cron job reads them and delivers via Hermes delivery system.
-    """
-    return True
+    return title, "\n".join(lines) if lines else etype, priority
 
 
 def notify(event: BotEvent) -> bool:
-    """Send a notification and save the event."""
+    """Send to Gotify AND save to events file."""
     _save_event(event)
 
-    msg = format_message(event)
-    logger.info("NOTIFY: {}", msg.replace("\n", " | "))
+    title, message, priority = _format_event(event)
+    ok = _send_gotify(title, message, priority)
 
-    return send_whatsapp(msg)
+    logger.info("NOTIFY: {} | {} | priority={} | gotify={}",
+                title, message.replace("\n", " | "), priority, ok)
+
+    return ok
 
 
 # ── Helper functions ──
