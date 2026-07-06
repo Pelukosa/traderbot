@@ -23,6 +23,7 @@ from src.exchange import ExchangeManager
 from src.execution import ExecutionManager
 from src.logger import setup_logger
 from src.strategy import STRATEGY_REGISTRY
+from src.notifications import notify_buy, notify_sell, notify_sl, notify_error, notify_startup, notify_shutdown, notify_heartbeat
 
 from src.strategy import Signal
 
@@ -49,10 +50,19 @@ async def main_loop() -> None:
 
     # Track last hour we checked for buy signals
     last_buy_check_hour = -1
+    last_heartbeat_day = -1
 
     try:
         await exchange.load_markets()
         logger.info("Markets loaded — connected to {}", settings.exchange_id)
+
+        # Notify startup
+        try:
+            bal = await exchange.fetch_balance()
+            eur_free = float(bal.get("EUR", {}).get("free", 0))
+            notify_startup(balance=eur_free)
+        except Exception:
+            notify_startup(balance=0)
 
         # ── Restore position on restart ──
         try:
@@ -172,19 +182,35 @@ async def main_loop() -> None:
                     else:
                         logger.debug("In position — skipping buy check")
 
-                # 8. Sleep
+                # 8. Daily heartbeat
+                current_day = int(time.time() // 86400)
+                if current_day != last_heartbeat_day:
+                    last_heartbeat_day = current_day
+                    try:
+                        bal = await exchange.fetch_balance()
+                        eur_bal = float(bal.get("EUR", {}).get("free", 0))
+                        notify_heartbeat(balance=eur_bal, price=ticker_price,
+                                         in_position=execution.in_position)
+                    except Exception:
+                        pass
+
+                # 9. Sleep
                 await asyncio.sleep(FAST_TICK)
 
             except Exception:
                 logger.exception("Error in main loop tick")
+                notify_error("Error en tick del loop principal", details={"tick": int(time.time())})
                 await asyncio.sleep(30)
 
     except asyncio.CancelledError:
         logger.info("Shutdown requested")
+        notify_shutdown()
     except Exception:
         logger.exception("Fatal error in main loop")
+        notify_error("Fallo fatal en el loop principal")
     finally:
         logger.info("Cleaning up …")
+        notify_shutdown()
         await exchange.close()
         logger.info("traderbot stopped")
 

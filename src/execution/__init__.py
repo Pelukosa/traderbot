@@ -11,6 +11,8 @@ from loguru import logger
 
 from src.config import settings
 from src.exchange import ExchangeManager
+from src.logger import get_safe_logger
+from src.notifications import notify_buy, notify_sell, notify_sl
 from src.logger.trades import log_trade
 from src.logger.performance import log_strategy_trade
 from src.strategy import Signal, STRATEGY_REGISTRY
@@ -237,6 +239,13 @@ class ExecutionManager:
             entry_time=datetime.now(timezone.utc),
         )
 
+        # Notify buy
+        try:
+            notify_buy(price=price, balance=eur_free,
+                       details={"amount": round(amount, 6), "sl": round(sl, 2) if sl else 0})
+        except Exception:
+            pass
+
     async def _close_position(self, symbol: str, current_ohlcv: list[list[float]] | None = None) -> None:
         if self._position is None:
             return
@@ -358,6 +367,13 @@ class ExecutionManager:
 
                     logger.info("Position closed  entry={:.2f}  exit={:.2f}  pnl={:+.2f}€ ({:+.2f}%%)  dur={:.0f}min",
                                 entry_price, sell_price, pnl_eur, pnl_pct, duration_min)
+
+                    # Notify sell
+                    try:
+                        notify_sell(price=sell_price, pnl=pnl_eur, balance=eur_after,
+                                    reason="señal/cierre")
+                    except Exception:
+                        pass
             except Exception as exc:
                 raise OrderError(f"Sell order failed: {exc}") from exc
 
@@ -398,6 +414,13 @@ class ExecutionManager:
                 "STOP-LOSS HIT @ {:.2f}  (entry={:.2f}, sl={:.2f})",
                 current_price, pos.entry_price, sl,
             )
+            try:
+                pnl = (current_price - pos.entry_price) * pos.amount
+                bal = await self._exchange.fetch_balance()
+                eur = float(bal.get("EUR", {}).get("free", 0)) if bal else 0.0
+                notify_sl(price=current_price, pnl=pnl, balance=eur)
+            except Exception:
+                pass
             await self._close_position(pos.symbol)
             return
 
