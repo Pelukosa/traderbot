@@ -171,9 +171,12 @@ class ExecutionManager:
             try:
                 order = await self._exchange.create_market_buy_order(symbol, amount)
                 if order is None:
-                    logger.error("Kraken returned None order — likely insufficient funds or rate limit")
+                    logger.error("Kraken returned None order — insufficient funds or rate limit")
                     return
                 logger.info("ORDER PLACED: {}", order)
+                if not isinstance(order, dict):
+                    logger.error("Unexpected order response type: {}", type(order))
+                    return
                 fills = order.get("fills", [])
                 if fills:
                     avg_price = sum(f["price"] * f["amount"] for f in fills) / sum(f["amount"] for f in fills)
