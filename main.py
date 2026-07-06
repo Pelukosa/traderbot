@@ -54,8 +54,14 @@ async def main_loop() -> None:
             logger.info("Restore check — {}: {:.8f}  EUR: {:.2f}", base, btc_free, eur_free)
             if btc_free >= 0.00001:
                 # We're already in position — don't buy until we sell
-                execution.set_in_position(btc_free)
-                logger.info("Position restored — {} BTC @ market, waiting for sell signal", btc_free)
+                # Use current market price as estimated entry
+                try:
+                    ticker_ohlcv = await exchange.fetch_ohlcv(settings.trading_symbol, timeframe="1m", limit=1)
+                    current_price = float(ticker_ohlcv[0][4]) if ticker_ohlcv else 0.0
+                except Exception:
+                    current_price = 0.0
+                execution.set_in_position(btc_free, entry_price=current_price)
+                logger.info("Position restored — {} BTC at ~{:.2f}, waiting for sell signal", btc_free, current_price or 0)
             else:
                 logger.info("No position found — ready to buy")
         except Exception:
@@ -68,6 +74,7 @@ async def main_loop() -> None:
         logger.info("Initial OHLCV candles: {}", len(ohlcv))
 
         # ── Main loop ───────────────────────────────────────────────────────
+        sync_counter = 0
         while True:
             # 1. Kill switch check
             if exchange.kill_switch_triggered:
@@ -104,6 +111,20 @@ async def main_loop() -> None:
             except Exception:
                 logger.exception("Strategy error")
                 continue
+
+            # Sync position with exchange every ~5 minutes
+            sync_counter += 1
+            if sync_counter >= 7 and execution.in_position:  # ~5 min (7*45s)
+                sync_counter = 0
+                try:
+                    bal = await exchange.fetch_balance()
+                    base = settings.trading_symbol.split("/")[0]
+                    real_btc = float(bal.get(base, {}).get("free", 0))
+                    if real_btc < 0.00001:
+                        logger.info("Position sync — no BTC found. Resetting internal state.")
+                        execution.reset_position()
+                except Exception:
+                    pass
 
             # 5. Execute
             if signal.action != "hold":

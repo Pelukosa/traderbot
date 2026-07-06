@@ -71,20 +71,21 @@ class ExecutionManager:
     def in_position(self) -> bool:
         return self._position is not None and self._position.active
 
-    def set_in_position(self, btc_amount: float) -> None:
+    def set_in_position(self, btc_amount: float, entry_price: float = 0.0) -> None:
         """Restore a position after restart (buy already happened)."""
-        price = 0.0  # unknown — will use actual sell price at close
+        price = entry_price
+        sl = price * 0.985 if price > 0 else None  # 1.5% SL if we know price
         self._position = Position(
             symbol=settings.trading_symbol,
             side="long",
-            entry_price=price,
+            entry_price=price or 0.001,  # avoid div by zero
             amount=btc_amount,
-            stop_loss=None,
+            stop_loss=sl,
             take_profit=None,
-            highest_price=0.0,
+            highest_price=price or 0.001,
             entry_time=datetime.now(timezone.utc),
         )
-        logger.info("Position restored — {:.8f} BTC, waiting for sell signal", btc_amount)
+        logger.info("Position restored — {:.8f} BTC at ~{:.2f}, waiting for sell signal", btc_amount, price or 0.001)
 
     def _simulate_only(self) -> bool:
         return settings.risk_mode == "simulation"
@@ -114,6 +115,21 @@ class ExecutionManager:
     async def execute_signal(self, signal: Signal, price: float, strategy_name: str = "", ohlcv: list[list[float]] | None = None) -> None:
         """React to a strategy signal: open/close positions."""
         symbol = settings.trading_symbol
+
+        # ── Sync position with real exchange balance ──
+        # If we think we're in position but exchange has no BTC, reset
+        # This handles manual sells from the exchange app
+        if self.in_position:
+            try:
+                bal = await self._exchange.fetch_balance()
+                base = symbol.split("/")[0]
+                real_btc = float(bal.get(base, {}).get("free", 0))
+                if real_btc < 0.00001:
+                    logger.info("No BTC in exchange — position was closed externally. Resetting.")
+                    self._position = None
+                    self._trade_ctx = None
+            except Exception:
+                pass
 
         if signal.action == "buy" and not self.in_position:
             try:
@@ -353,6 +369,12 @@ class ExecutionManager:
         self._position = None
         self._trade_ctx = None
 
+    def reset_position(self) -> None:
+        """Force-reset internal position state (used after external manual sell)."""
+        self._position = None
+        self._trade_ctx = None
+        logger.info("Position state reset")
+
     async def _check_exits(self, current_price: float) -> None:
         if self._position is None or not self._position.active:
             return
@@ -362,7 +384,7 @@ class ExecutionManager:
 
         # ── 1. Trailing stop-loss ──
         # Si el precio sube, movemos el SL hacia arriba (nunca hacia abajo)
-        if current_price > pos.highest_price:
+        if current_price > pos.highest_price and pos.entry_price > 1:  # entry_price=0.001 = unknown
             pos.highest_price = current_price
             # Trailing: SL se sitúa al 60% de la ganancia máxima
             # Si subió un 2%, el trailing SL está en +1.2%
