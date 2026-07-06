@@ -194,35 +194,45 @@ class MACD(BaseStrategy):
         return Signal(metadata=meta)
 
 
-# ── MACD Histogram Divergence (anticipativa) ───────────────────────────────
+# ── MACD Histogram Valley/Peak (con confirmación) ─────────────────────────
 
 
 class MACDDivergence(BaseStrategy):
-    """MACD Histogram Divergence — anticipa el cruce 1-2 velas antes.
+    """MACD Histogram Valley & Peak detection con confirmación de 2 velas.
 
-    El histograma (MACD - señal) forma ondas como campanas de Gauss.
-    - **BUY** cuando el histograma venía subiendo (barras verdes cada vez más
-      grandes) y **empieza a encogerse** — el momentum alcista se agota,
-      el cruce a la baja está cerca.
-    - **SELL** cuando el histograma venía bajando (barras rojas cada vez más
-      grandes) y **empieza a encogerse** — el momentum bajista se agota,
-      el cruce al alza está cerca.
+    En lugar de anticipar el cruce, detecta el **valle** (mínimo) o el **pico**
+    (máximo) del histograma y entra **2 velas después** de que la tendencia se
+    revierta.
 
-    Esta estrategia gana 1-2 velas respecto al MACD clásico, pero es menos
-    fiable (puede haber falsos).
+    CÓMO FUNCIONA
+    -------------
+    El histograma (MACD - línea de señal) forma montañas y valles.
 
-    Esta es la única estrategia que se ejecuta en solitario (no necesita
-    majority vote).
+    **COMPRA (valle):**
+      El histograma viene bajando (cada vez más negativo): -1, -5, -12, -15.
+      En -15 toca fondo (valle) y empieza a subir: -14, -12, -8…
+      → Entramos en la 2ª vela después del valle (en el -12 del ejemplo),
+         asumiendo que el valle ya pasó y la tendencia alcista se confirma.
+
+    **VENTA (pico):**
+      El histograma viene subiendo (cada vez más positivo): 5, 12, 18, 21.
+      En 21 toca techo (pico) y empieza a bajar: 18, 17, 14…
+      → Vendemos en la 2ª vela después del pico (en el 17 del ejemplo).
+
+    Esta estrategia NO espera al cruce MACD — gana 5-10 velas respecto al
+    MACD clásico. Es la única estrategia que se ejecuta en solitario.
     """
 
     fast: int = 12
     slow: int = 26
     signal: int = 9
+    confirm_velas: int = 2  # velas después del valle/pico para entrar
 
     def __init__(self) -> None:
         super().__init__()
-        self._prev_hist: float | None = None
-        self._prev_hist2: float | None = None  # two steps back to detect slope change
+        self._hist_buffer: list[float] = []  # rolling buffer of histogram values
+        self._awaiting_action: str | None = None  # "buy" or "sell" pending
+        self._confirm_count: int = 0
 
     @staticmethod
     def _ema(data: np.ndarray, period: int) -> np.ndarray:
@@ -245,47 +255,77 @@ class MACDDivergence(BaseStrategy):
 
     async def compute_signal(self, ohlcv: list[list[float]]) -> Signal:
         closes = np.array([c[4] for c in ohlcv], dtype=np.float64)
-        min_len = self.slow + self.signal + 3
+        min_len = self.slow + self.signal + 5
         if len(closes) < min_len:
             return Signal(metadata={"reason": "insufficient data"})
 
         hist = self._histogram(closes)
-        meta: dict[str, Any] = {"histogram": round(hist, 2)}
+        self._hist_buffer.append(hist)
 
-        if self._prev_hist is not None and self._prev_hist2 is not None:
-            # We need 3 histogram values to detect a peak/trough
-            # h2 -> h1 -> hist  (h2 is oldest)
-            h2, h1 = self._prev_hist2, self._prev_hist
+        # Keep last 5 values for detection
+        if len(self._hist_buffer) > 5:
+            self._hist_buffer = self._hist_buffer[-5:]
 
-            # --- BUY signal ---
-            # Histogram was going up (h2 <= h1) then starts shrinking (h1 > hist)
-            # AND histogram is positive (momentum still bullish but fading)
-            if h2 < h1 and hist < h1 and h1 > 0 and hist > 0:
-                confidence = min(abs(h1 - hist) / max(abs(h1), 1.0), 1.0)
+        meta: dict[str, Any] = {"histogram": round(hist, 2), "buffer": [round(h, 2) for h in self._hist_buffer]}
+
+        # Need at least 3 values to detect anything
+        if len(self._hist_buffer) < 4:
+            return Signal(metadata=meta)
+
+        # ── Check if we're in confirmation wait mode ──
+        if self._awaiting_action:
+            self._confirm_count += 1
+            if self._confirm_count >= self.confirm_velas:
+                # Execute the pending action
+                action = self._awaiting_action
+                self._awaiting_action = None
+                self._confirm_count = 0
+                confidence = min(abs(self._hist_buffer[-1] - self._hist_buffer[-2]) / max(abs(self._hist_buffer[-1]), 1.0), 1.0) + 0.3
+                confidence = min(confidence, 1.0)
+                signal_type = "valley_confirmed" if action == "buy" else "peak_confirmed"
                 logger.info(
-                    "MACD-DIV BUY  hist_prev={:.2f}  hist={:.2f}  conf={:.2f}",
-                    h1, hist, confidence,
+                    "MACD-DIV {}  hist={:.2f}  conf={:.2f}  type={}",
+                    action.upper(), hist, confidence, signal_type,
                 )
-                self._prev_hist2, self._prev_hist = self._prev_hist, hist
-                return Signal(action="buy", confidence=confidence, metadata={
-                    **meta, "signal": "peak_reversal",
+                return Signal(action=action, confidence=confidence, metadata={
+                    **meta, "signal": signal_type,
                 })
+            else:
+                # Still confirming, hold
+                return Signal(metadata={**meta, "confirming": self._awaiting_action, "count": self._confirm_count})
 
-            # --- SELL signal ---
-            # Histogram was going down (h2 >= h1) then starts shrinking up (h1 < hist)
-            # AND histogram is negative (momentum still bearish but fading)
-            if h2 > h1 and hist > h1 and h1 < 0 and hist < 0:
-                confidence = min(abs(h1 - hist) / max(abs(h1), 1.0), 1.0)
+        # ── DETECTAR VALLE (compra) ──
+        # El histograma venía bajando (h3 > h2 > h1) y luego H1 es el valle:
+        #   h[0] > h[1] > h[2] (valle) < h[3]   → valle detectado en h[2]
+        #   La 1ª reversión es h[3], entramos tras h[4] (2 velas después)
+        h = self._hist_buffer
+        if len(h) >= 4:
+            # Detectar valle: h[-4] >= h[-3] > h[-2] < h[-1]
+            # (el valle está en h[-2], h[-1] es la 1ª reversión)
+            if h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and h[-1] < 0:
+                # Valle detectado en h[-2], h[-1] es reversión (vela 1)
+                # Esperamos 2 velas de confirmación
+                self._awaiting_action = "buy"
+                self._confirm_count = 1  # h[-1] is the 1st confirmation candle
                 logger.info(
-                    "MACD-DIV SELL  hist_prev={:.2f}  hist={:.2f}  conf={:.2f}",
-                    h1, hist, confidence,
+                    "MACD-DIV VALLE detectado  hist={:.2f}  bottom={:.2f}  "
+                    "esperando {} velas…",
+                    hist, h[-2], self.confirm_velas,
                 )
-                self._prev_hist2, self._prev_hist = self._prev_hist, hist
-                return Signal(action="sell", confidence=confidence, metadata={
-                    **meta, "signal": "trough_reversal",
-                })
+                return Signal(metadata={**meta, "signal": "valley_detected", "confirming": "buy", "count": 1})
 
-        self._prev_hist2, self._prev_hist = self._prev_hist, hist
+            # Detectar pico: h[-4] <= h[-3] < h[-2] > h[-1]
+            if h[-4] <= h[-3] < h[-2] > h[-1] and h[-2] > 0 and h[-1] > 0:
+                # Pico detectado en h[-2], h[-1] es reversión (vela 1)
+                self._awaiting_action = "sell"
+                self._confirm_count = 1
+                logger.info(
+                    "MACD-DIV PICO detectado  hist={:.2f}  peak={:.2f}  "
+                    "esperando {} velas…",
+                    hist, h[-2], self.confirm_velas,
+                )
+                return Signal(metadata={**meta, "signal": "peak_detected", "confirming": "sell", "count": 1})
+
         return Signal(metadata=meta)
 
 
