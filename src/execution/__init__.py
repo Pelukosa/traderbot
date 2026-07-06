@@ -63,6 +63,10 @@ class ExecutionManager:
                 logger.warning("Could not fetch EUR balance, defaulting to 0")
 
             invest_eur = eur_free * 0.69
+            # Si no llega al mínimo de Kraken (~5€), sube al 95%
+            if invest_eur < 5 and eur_free >= 5.5:
+                invest_eur = eur_free * 0.95
+                logger.info("69% ({:.2f}€) < 5€ mínimo — usando 95% ({:.2f}€)", eur_free * 0.69, invest_eur)
             if invest_eur < 5:
                 logger.warning("Insufficient EUR ({} < 5€) — skipping buy", round(invest_eur, 2))
                 return
