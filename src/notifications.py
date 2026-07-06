@@ -18,8 +18,9 @@ from loguru import logger
 
 # ── Config ──
 # Se puede sobrescribir con variables de entorno
-NOTIFY_ENABLED = True
+HERMES_CLI = "/opt/data/home/.local/bin/hermes"
 NOTIFY_CHAT = "whatsapp:89064904589410@lid"  # DM directo a Alejandro
+NOTIFY_ENABLED = True
 
 # Fichero de eventos para persistencia
 EVENTS_FILE = Path(__file__).parent.parent / "data/events.json"
@@ -103,9 +104,8 @@ def send_whatsapp(text: str) -> bool:
 
     try:
         # Import Hermes send_message tool dynamically
-        import json as _json
         result = subprocess.run(
-            ["hermes", "send_message", NOTIFY_CHAT, text],
+            [HERMES_CLI, "send_message", NOTIFY_CHAT, text],
             capture_output=True, text=True, timeout=15,
         )
         if result.returncode == 0:
