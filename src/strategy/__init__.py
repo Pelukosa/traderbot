@@ -226,8 +226,8 @@ class MACDDivergence(BaseStrategy):
     fast: int = 12
     slow: int = 26
     signal: int = 9
-    confirm_velas: int = 1  # velas después del valle/pico para entrar
-    min_histogram_abs: float = 5.0  # |histograma| mínimo en el valle/pico para operar
+    confirm_velas: int = 1  # velas después del valle/pico para entrar (espera cierre)
+    min_histogram_abs: float = 50.0  # |histograma| mínimo en el valle/pico para operar
 
     def __init__(self) -> None:
         super().__init__()

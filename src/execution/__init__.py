@@ -29,7 +29,7 @@ class Position:
     entry_time: datetime | None = None  # for max-duration check
 
 
-MAX_POSITION_MINUTES: int = 60  # cierra automáticamente tras 1 hora
+MAX_POSITION_HOURS: int = 6  # cierra automáticamente tras 6 horas (6 velas de 1h sin señal)
 
 
 @dataclass
@@ -180,21 +180,13 @@ class ExecutionManager:
             await self._check_exits(price)
 
     async def _open_long(self, symbol: str, amount: float, price: float, eur_free: float = 0.0) -> None:
-        # SL dinámico: basado en la profundidad del valle del histograma
-        # Si el valle estaba en -15 y entramos en -12, el SL se calcula
-        # como la mitad del recorrido desde entrada hasta valle
-        valley_depth = 0.0
-        if self._trade_ctx and self._trade_ctx.buy_valley_value != 0:
-            valley_depth = abs(self._trade_ctx.buy_valley_value)
+        # SL fijo al 1%
+        sl = price * 0.99
 
-        # SL base: 0.6% fijo, se amplía si el valle es muy profundo (máx 2%)
-        sl_pct = max(0.6, min(valley_depth * 0.08, 2.0))
-        sl = price * (1 - sl_pct / 100.0)
-
-        # Sin TP fijo — la venta la decide la señal del histograma
+        # Sin TP fijo — trailing TP lo gestiona (mín 1%)
         tp = None
 
-        logger.info("SL dinámico: {:.2f}% -> {:.2f}  (valley_depth={:.2f})", sl_pct, sl, valley_depth)
+        logger.info("SL fijo: 1.00% -> {:.2f}", sl)
 
         if self._simulate_only():
             logger.info(
@@ -385,14 +377,11 @@ class ExecutionManager:
         pos = self._position
         now = datetime.now(timezone.utc)
 
-        # ── 1. Trailing stop-loss ──
-        # Si el precio sube, movemos el SL hacia arriba (nunca hacia abajo)
-        if current_price > pos.highest_price and pos.entry_price > 1:  # entry_price=0.001 = unknown
+        # ── 1. Trailing stop-loss (asegurar ganancias desde 1%) ──
+        if current_price > pos.highest_price and pos.entry_price > 1:
             pos.highest_price = current_price
-            # Trailing: SL se sitúa al 60% de la ganancia máxima
-            # Si subió un 2%, el trailing SL está en +1.2%
             gain_pct = (current_price - pos.entry_price) / pos.entry_price * 100
-            if gain_pct > 0.3:  # solo trailing si ha subido al menos 0.3%
+            if gain_pct > 1.0:  # trailing solo si ha subido al menos 1%
                 trail_pct = gain_pct * 0.6  # retiene el 60% de la ganancia
                 new_sl = pos.entry_price * (1 + trail_pct / 100.0)
                 if pos.stop_loss is None or new_sl > pos.stop_loss:
@@ -415,7 +404,7 @@ class ExecutionManager:
         # ── 3. Tiempo máximo en posición ──
         if pos.entry_time is not None:
             elapsed = (now - pos.entry_time).total_seconds() / 60.0
-            if elapsed >= MAX_POSITION_MINUTES:
+            if elapsed >= MAX_POSITION_HOURS * 60:
                 logger.warning(
                     "Tiempo máximo alcanzado ({:.0f}min) — cerrando posición @ {:.2f}",
                     elapsed, current_price,
