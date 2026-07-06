@@ -25,6 +25,11 @@ class Position:
     stop_loss: float | None = None
     take_profit: float | None = None
     active: bool = True
+    highest_price: float = 0.0  # for trailing stop
+    entry_time: datetime | None = None  # for max-duration check
+
+
+MAX_POSITION_MINUTES: int = 60  # cierra automáticamente tras 1 hora
 
 
 @dataclass
@@ -140,8 +145,21 @@ class ExecutionManager:
             await self._check_exits(price)
 
     async def _open_long(self, symbol: str, amount: float, price: float, eur_free: float = 0.0) -> None:
-        sl = price * (1 - settings.stop_loss_percent / 100.0)
-        tp = price * (1 + settings.take_profit_percent / 100.0)
+        # SL dinámico: basado en la profundidad del valle del histograma
+        # Si el valle estaba en -15 y entramos en -12, el SL se calcula
+        # como la mitad del recorrido desde entrada hasta valle
+        valley_depth = 0.0
+        if self._trade_ctx and self._trade_ctx.buy_valley_value != 0:
+            valley_depth = abs(self._trade_ctx.buy_valley_value)
+
+        # SL base: 1.5% fijo, pero se amplía si el valle es muy profundo
+        sl_pct = max(1.5, min(valley_depth * 0.15, 4.0))
+        sl = price * (1 - sl_pct / 100.0)
+
+        # Sin TP fijo — la venta la decide la señal del histograma
+        tp = None
+
+        logger.info("SL dinámico: {:.2f}% -> {:.2f}  (valley_depth={:.2f})", sl_pct, sl, valley_depth)
 
         if self._simulate_only():
             logger.info(
@@ -179,6 +197,8 @@ class ExecutionManager:
             amount=amount,
             stop_loss=sl,
             take_profit=tp,
+            highest_price=price,
+            entry_time=datetime.now(timezone.utc),
         )
 
     async def _close_position(self, symbol: str, current_ohlcv: list[list[float]] | None = None) -> None:
@@ -306,15 +326,46 @@ class ExecutionManager:
         if self._position is None or not self._position.active:
             return
 
-        sl = self._position.stop_loss
-        tp = self._position.take_profit
-        if sl is not None and current_price <= sl:
-            logger.warning("STOP-LOSS HIT @ {:.2f}", current_price)
-            await self._close_position(self._position.symbol)
+        pos = self._position
+        now = datetime.now(timezone.utc)
 
-        elif tp is not None and current_price >= tp:
-            logger.info("TAKE-PROFIT HIT @ {:.2f}", current_price)
-            await self._close_position(self._position.symbol)
+        # ── 1. Trailing stop-loss ──
+        # Si el precio sube, movemos el SL hacia arriba (nunca hacia abajo)
+        if current_price > pos.highest_price:
+            pos.highest_price = current_price
+            # Trailing: SL se sitúa al 60% de la ganancia máxima
+            # Si subió un 2%, el trailing SL está en +1.2%
+            gain_pct = (current_price - pos.entry_price) / pos.entry_price * 100
+            if gain_pct > 0.3:  # solo trailing si ha subido al menos 0.3%
+                trail_pct = gain_pct * 0.6  # retiene el 60% de la ganancia
+                new_sl = pos.entry_price * (1 + trail_pct / 100.0)
+                if pos.stop_loss is None or new_sl > pos.stop_loss:
+                    pos.stop_loss = new_sl
+                    logger.info(
+                        "Trailing SL actualizado: {:.2f}  (gain={:+.2f}%, trail={:.2f}%)",
+                        new_sl, gain_pct, trail_pct,
+                    )
+
+        # ── 2. Stop-loss ──
+        sl = pos.stop_loss
+        if sl is not None and current_price <= sl:
+            logger.warning(
+                "STOP-LOSS HIT @ {:.2f}  (entry={:.2f}, sl={:.2f})",
+                current_price, pos.entry_price, sl,
+            )
+            await self._close_position(pos.symbol)
+            return
+
+        # ── 3. Tiempo máximo en posición ──
+        if pos.entry_time is not None:
+            elapsed = (now - pos.entry_time).total_seconds() / 60.0
+            if elapsed >= MAX_POSITION_MINUTES:
+                logger.warning(
+                    "Tiempo máximo alcanzado ({:.0f}min) — cerrando posición @ {:.2f}",
+                    elapsed, current_price,
+                )
+                await self._close_position(pos.symbol)
+                return
 
     async def emergency_close_all(self) -> None:
         if self._position:
