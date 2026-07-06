@@ -170,6 +170,9 @@ class ExecutionManager:
         else:
             try:
                 order = await self._exchange.create_market_buy_order(symbol, amount)
+                if order is None:
+                    logger.error("Kraken returned None order — likely insufficient funds or rate limit")
+                    return
                 logger.info("ORDER PLACED: {}", order)
                 fills = order.get("fills", [])
                 if fills:
