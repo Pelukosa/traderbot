@@ -226,7 +226,8 @@ class MACDDivergence(BaseStrategy):
     fast: int = 12
     slow: int = 26
     signal: int = 9
-    confirm_velas: int = 2  # velas después del valle/pico para entrar
+    confirm_velas: int = 1  # velas después del valle/pico para entrar
+    min_histogram_abs: float = 5.0  # |histograma| mínimo en el valle/pico para operar
 
     def __init__(self) -> None:
         super().__init__()
@@ -332,7 +333,7 @@ class MACDDivergence(BaseStrategy):
         #   h[-4] >= h[-3] > h[-2] < h[-1]  → valle en h[-2]
         h = self._hist_buffer
         if len(h) >= 4:
-            if h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and h[-1] < 0:
+            if h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and h[-1] < 0 and abs(h[-2]) >= self.min_histogram_abs:
                 self._detected_valley = h[-2]
                 self._awaiting_action = "buy"
                 self._confirm_count = 1
@@ -347,7 +348,7 @@ class MACDDivergence(BaseStrategy):
                 })
 
             # Detectar pico: h[-4] <= h[-3] < h[-2] > h[-1]
-            if h[-4] <= h[-3] < h[-2] > h[-1] and h[-2] > 0 and h[-1] > 0:
+            if h[-4] <= h[-3] < h[-2] > h[-1] and h[-2] > 0 and h[-1] > 0 and abs(h[-2]) >= self.min_histogram_abs:
                 self._detected_peak = h[-2]
                 self._awaiting_action = "sell"
                 self._confirm_count = 1
