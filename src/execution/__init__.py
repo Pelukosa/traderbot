@@ -159,7 +159,7 @@ class ExecutionManager:
                     total_fee = sum(f.get("fee", {}).get("cost", 0) for f in fills)
                     filled_amount = sum(f["amount"] for f in fills)
                 else:
-                    avg_price = float(order.get("price", price))
+                    avg_price = float(order.get("price") or price)
                     total_fee = float(order.get("fee", {}).get("cost", 0))
                     filled_amount = float(order.get("filled", amount))
                 log_trade("buy", symbol, filled_amount, avg_price, total_fee,
@@ -224,7 +224,7 @@ class ExecutionManager:
                         sell_price = sum(f["price"] * f["amount"] for f in fills) / sum(f["amount"] for f in fills)
                         sell_fee = sum(f.get("fee", {}).get("cost", 0) for f in fills)
                     else:
-                        sell_price = float(order.get("price", entry_price))
+                        sell_price = float(order.get("price") or entry_price)
                         sell_fee = float(order.get("fee", {}).get("cost", 0))
                     pnl_eur = (sell_price - entry_price) * sell_amount
                     pnl_pct = ((sell_price - entry_price) / entry_price) * 100
