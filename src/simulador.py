@@ -11,19 +11,24 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import random
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 
 # ── Config ──
-INITIAL_EUR = 120.0        # capital simulado
+INITIAL_EUR = 1000.0       # capital simulado
 INVEST_PCT = 95.0          # % del capital por operacion
 TRAIL_RETAIN = 0.6         # % de ganancia que retiene el trailing
 MAX_POSITION_CANDLES = 12  # maximo velas en posicion (12h)
 MIN_TRADE = 5.0            # minimo para operar
+MIN_OPS_FOR_RANKING = 1500  # mínimo de operaciones para aparecer en el TOP
 FEE_RATE = 0.0             # comision simulada (% por operacion, 0.20 = OKX)
 
 DATA_FILE = Path(__file__).parent.parent / "BTCUSD_1h_Binance.csv"
@@ -564,6 +569,789 @@ def simular_macd_hist_50(
     return r
 
 
+# ── Random Search: señal genérica multi-indicador ──
+
+# Rangos de los ~30 parámetros más significativos para trading de Bitcoin
+RANDOM_PARAM_SPACE: dict[str, tuple | list] = {
+    # ── Risk Management ──
+    "tp_percent":          (0.5, 5.0),        # Take profit %
+    "sl_percent":          (0.5, 5.0),        # Stop loss %
+
+    # ── RSI ──
+    "use_rsi":             [True, False],
+    "rsi_period":          (7, 21),
+    "rsi_oversold":        (20, 45),
+
+    # ── MACD ──
+    "use_macd":            [True, False],
+    "macd_fast":           (8, 20),
+    "macd_slow":           (21, 40),
+    "macd_signal_period":  (7, 12),
+    "macd_hist_min":       (20, 80),
+
+    # ── Bollinger Bands ──
+    "use_bb":              [True, False],
+    "bb_period":           (10, 30),
+    "bb_std_mult":         (1.5, 3.0),
+    "bb_position_pct":     (0.0, 5.0),        # % máximo por encima de la banda inferior
+
+    # ── Volumen ──
+    "use_volume":          [True, False],
+    "vol_ma_period":       (10, 30),
+    "vol_multiplier":      (1.0, 3.0),
+
+    # ── Moving Average Crossover ──
+    "use_ma_cross":        [True, False],
+    "ma_short":            (5, 20),
+    "ma_long":             (21, 50),
+
+    # ── ATR ──
+    "use_atr_sl":          [True, False],     # usar ATR para SL dinámico
+    "atr_period":          (10, 20),
+    "atr_mult_sl":         (1.0, 3.0),
+
+    # ── Posición ──
+    "max_position_candles": (6, 24),
+    "min_candles_between":  (0, 5),
+    "confirmation_candles": (0, 3),
+
+    # ── Momentum / ROC ──
+    "use_momentum":         [True, False],
+    "momentum_period":      (5, 20),
+    "momentum_threshold":   (0.5, 3.0),
+}
+
+
+def _sample_random_params() -> dict:
+    """Devuelve un diccionario con una combinación aleatoria de parámetros."""
+    cfg: dict = {}
+    for key, space in RANDOM_PARAM_SPACE.items():
+        if isinstance(space, list):
+            cfg[key] = random.choice(space)
+        elif isinstance(space, tuple):
+            if isinstance(space[0], int) and isinstance(space[1], int):
+                cfg[key] = random.randint(space[0], space[1])
+            else:
+                cfg[key] = round(random.uniform(space[0], space[1]), 2)
+    # Ensure invest_percent is always 100% and at least one signal is active
+    cfg["invest_percent"] = 100.0
+    if not any(cfg.get(k) for k in ("use_rsi", "use_macd", "use_bb", "use_volume", "use_ma_cross", "use_momentum")):
+        cfg["use_rsi"] = True
+    return cfg
+
+
+def _build_signal_fn(cfg: dict, precomputed: dict):
+    """Construye una función de señal RÁPIDA usando arrays precomputados.
+
+    NO recalcula indicadores por cada vela — usa `precomputed` ya calculado.
+    """
+
+    conditions: list[tuple[str, Callable[[int], bool]]] = []
+
+    # ── RSI ──
+    if cfg.get("use_rsi"):
+        rsi_arr = precomputed["rsi_arr"]
+        threshold = cfg["rsi_oversold"]
+        conditions.append(("rsi", lambda i, a=rsi_arr, t=threshold: (
+            i < len(a) and not np.isnan(a[i]) and float(a[i]) < t
+        )))
+
+    # ── MACD valley ──
+    if cfg.get("use_macd"):
+        hist_arr = precomputed["hist_arr"]
+        min_abs = cfg["macd_hist_min"]
+        conditions.append(("macd", lambda i, h=hist_arr, m=min_abs: (
+            i >= 4
+            and not any(np.isnan(h[j]) for j in range(i - 3, i + 1))
+            and float(h[i - 3]) >= float(h[i - 2]) > float(h[i - 1]) < float(h[i])
+            and float(h[i - 1]) < 0
+            and abs(float(h[i - 1])) >= m
+        )))
+
+    # ── Bollinger Bands ──
+    if cfg.get("use_bb"):
+        bb_low = precomputed["bb_low"]
+        bb_pos = float(cfg["bb_position_pct"])
+        closes_p = precomputed["closes"]
+        conditions.append(("bb", lambda i, bl=bb_low, bp=bb_pos, c=closes_p: (
+            i < len(bl) and not np.isnan(bl[i])
+            and float(c[i]) <= float(bl[i]) * (1.0 + bp / 100.0)
+        )))
+
+    # ── Volumen ──
+    if cfg.get("use_volume"):
+        vol_arr = precomputed["vols"]
+        vol_ma = precomputed["vol_ma"]
+        vm = float(cfg["vol_multiplier"])
+        conditions.append(("vol", lambda i, v=vol_arr, ma=vol_ma, m=vm: (
+            i < len(ma) and not np.isnan(ma[i]) and float(ma[i]) > 0
+            and float(v[i]) > float(ma[i]) * m
+        )))
+
+    # ── MA Crossover ──
+    if cfg.get("use_ma_cross"):
+        ma_s = precomputed["ma_short_arr"]
+        ma_l = precomputed["ma_long_arr"]
+        conditions.append(("ma_cross", lambda i, ms=ma_s, ml=ma_l: (
+            i >= 1
+            and i < len(ms) and i < len(ml)
+            and not np.isnan(ms[i - 1]) and not np.isnan(ml[i - 1])
+            and not np.isnan(ms[i]) and not np.isnan(ml[i])
+            and float(ms[i - 1]) <= float(ml[i - 1])
+            and float(ms[i]) > float(ml[i])
+        )))
+
+    # ── Momentum / ROC ──
+    if cfg.get("use_momentum"):
+        closes_m = precomputed["closes"]
+        mom_period = int(cfg["momentum_period"])
+        mom_th = float(cfg["momentum_threshold"])
+        conditions.append(("momentum", lambda i, c=closes_m, p=mom_period, t=mom_th: (
+            i >= p
+            and (float(c[i]) - float(c[i - p])) / float(c[i - p]) * 100.0 > t
+        )))
+
+    if not conditions:
+        def _always(_pre: dict, _i: int, _cfg: dict | None = None) -> str | None:
+            return "buy"
+        return _always
+
+    # OR logic: any active condition triggers buy
+    def _signal(_pre: dict, i: int, _cfg: dict | None = None) -> str | None:
+        for _name, check in conditions:
+            if check(i):
+                return "buy"
+        return None
+
+    return _signal
+
+
+RANDOM_SEARCH_CSV = SIM_DIR / "random_search_history.csv"
+RANDOM_SEARCH_JSON_OLD = SIM_DIR / "random_search_history.json"
+
+# ── Orden canónico de columnas ──
+_CSV_META_COLS = ["global_id", "timestamp", "run_tag", "fee_rate"]
+_CSV_PARAM_COLS = ["invest_percent"] + sorted(RANDOM_PARAM_SPACE.keys())
+_CSV_RESULT_COLS = [
+    "total_ops", "ganadoras", "perdedoras", "winrate",
+    "ganancia_media_por_op", "ganancia_media_ganadoras", "perdida_media_perdedoras",
+    "mejor_operacion", "peor_operacion",
+    "pnl_neto", "pnl_por_operacion",
+    "roi_mensual", "pnl_mensual", "max_drawdown", "score",
+    "tiempo_medio_h", "ops_por_mes",
+]
+_CSV_ALL_COLS = _CSV_META_COLS + _CSV_PARAM_COLS + _CSV_RESULT_COLS
+
+
+def _migrate_json_to_csv() -> int:
+    """Migra el JSON antiguo a CSV si existe. Devuelve número de entradas migradas."""
+    if not RANDOM_SEARCH_JSON_OLD.exists():
+        return 0
+    try:
+        with open(RANDOM_SEARCH_JSON_OLD) as f:
+            old_data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return 0
+
+    rows = []
+    for entry in old_data:
+        row: dict = {
+            "global_id": entry.get("global_id", 0),
+            "timestamp": entry.get("timestamp", ""),
+            "run_tag": entry.get("run_tag", ""),
+            "fee_rate": entry.get("fee_rate", 0.0),
+        }
+        # Flatten params
+        params = entry.get("params", {})
+        for k in _CSV_PARAM_COLS:
+            row[k] = params.get(k, "")
+        # Flatten results
+        results = entry.get("results", {})
+        for k in _CSV_RESULT_COLS:
+            row[k] = results.get(k, 0)
+        # Handle nested results dict
+        if isinstance(results, dict):
+            for k in _CSV_RESULT_COLS:
+                if k in results:
+                    row[k] = results[k]
+        rows.append(row)
+
+    if rows:
+        _write_csv(rows)
+        # Rename old JSON as backup
+        RANDOM_SEARCH_JSON_OLD.rename(RANDOM_SEARCH_JSON_OLD.with_suffix(".json.bak"))
+        print(f"  📦 Migradas {len(rows)} entradas de JSON → CSV")
+
+    return len(rows)
+
+
+def _load_csv_history() -> list[dict]:
+    """Carga el histórico CSV. Si no existe, migra desde JSON."""
+    # Auto-migrate from old JSON
+    if not RANDOM_SEARCH_CSV.exists() and RANDOM_SEARCH_JSON_OLD.exists():
+        _migrate_json_to_csv()
+
+    if not RANDOM_SEARCH_CSV.exists():
+        return []
+
+    rows = []
+    with open(RANDOM_SEARCH_CSV, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Convert numeric strings back to proper types
+            parsed: dict = {}
+            for k, v in row.items():
+                if k in _CSV_PARAM_COLS:
+                    # Try int, then float, keep as string if neither
+                    if v == "True":
+                        parsed[k] = True
+                    elif v == "False":
+                        parsed[k] = False
+                    elif v == "":
+                        parsed[k] = ""
+                    else:
+                        try:
+                            parsed[k] = int(v) if "." not in v else float(v)
+                        except ValueError:
+                            parsed[k] = v
+                elif k in _CSV_RESULT_COLS or k in ("global_id", "fee_rate"):
+                    try:
+                        parsed[k] = float(v) if "." in v else int(v)
+                    except (ValueError, TypeError):
+                        parsed[k] = v
+                else:
+                    parsed[k] = v
+            rows.append(parsed)
+    return rows
+
+
+def _write_csv(rows: list[dict]) -> None:
+    """Escribe (sobrescribe) el CSV con las filas dadas."""
+    SIM_DIR.mkdir(parents=True, exist_ok=True)
+    with open(RANDOM_SEARCH_CSV, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_ALL_COLS)
+        writer.writeheader()
+        for row in rows:
+            # Ensure all columns present
+            clean: dict = {}
+            for col in _CSV_ALL_COLS:
+                val = row.get(col, "")
+                if isinstance(val, bool):
+                    val = str(val)
+                clean[col] = val
+            writer.writerow(clean)
+
+
+def _entry_to_csv_row(cfg: dict, r: ResultadoSim, fee_rate: float, run_tag: str, gid: int) -> dict:
+    """Convierte una iteración a fila plana para CSV."""
+    row: dict = {
+        "global_id": gid,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "run_tag": run_tag,
+        "fee_rate": fee_rate,
+    }
+    # Params
+    for k in _CSV_PARAM_COLS:
+        row[k] = cfg.get(k, "")
+    # Results
+    row["total_ops"] = r.total_ops
+    row["ganadoras"] = r.ganadoras
+    row["perdedoras"] = r.perdedoras
+    row["winrate"] = round(r.winrate, 2)
+    row["ganancia_media_por_op"] = round(r.ganancia_media_por_op, 2)
+    row["ganancia_media_ganadoras"] = round(r.ganancia_media_ganadoras, 2)
+    row["perdida_media_perdedoras"] = round(r.perdida_media_perdedoras, 2)
+    row["mejor_operacion"] = round(r.mejor_operacion, 2)
+    row["peor_operacion"] = round(r.peor_operacion, 2)
+    row["pnl_neto"] = round(r.pnl_neto, 2)
+    row["pnl_por_operacion"] = round(r.pnl_por_operacion, 2)
+    row["roi_mensual"] = round(r.roi_mensual, 2)
+    row["pnl_mensual"] = round(r.pnl_mensual, 2)
+    row["max_drawdown"] = round(r.max_drawdown, 2)
+    row["score"] = round(r.score, 2)
+    row["tiempo_medio_h"] = round(r.tiempo_medio_h, 2)
+    row["ops_por_mes"] = round(r.ops_por_mes, 2)
+    return row
+
+
+# ── Worker para multiprocessing (top-level, pickleable) ──
+
+def _simulate_one_iteration(args: tuple) -> dict:
+    """Ejecuta UNA iteración del random search. Debe ser top-level para multiprocessing.
+
+    Args:
+        args: (ohlcv, closes, highs, lows, vols, total_dias, n, capital, fee_rate, index)
+
+    Returns:
+        dict con 'cfg', 'results', 'trades_count', 'index'
+    """
+    ohlcv, closes, highs, lows, vols, total_dias, n, capital, fee_rate, index = args
+
+    cfg = _sample_random_params()
+
+    invest_pct = cfg["invest_percent"] / 100.0
+    tp_rate = cfg["tp_percent"] / 100.0
+    sl_rate = cfg["sl_percent"] / 100.0
+
+    max_candles = int(cfg["max_position_candles"])
+    min_between = int(cfg["min_candles_between"])
+    confirm = int(cfg["confirmation_candles"])
+
+    use_atr_sl = cfg.get("use_atr_sl", False)
+    atr_period = int(cfg["atr_period"])
+    atr_mult = float(cfg["atr_mult_sl"])
+
+    fee_por_op = fee_rate / 100.0
+
+    # ── Precomputar indicadores ──
+    precomp: dict = {"closes": closes, "vols": vols, "highs": highs, "lows": lows}
+
+    if cfg.get("use_rsi"):
+        precomp["rsi_arr"] = _rsi(closes, int(cfg["rsi_period"]))
+
+    if cfg.get("use_macd"):
+        fast = int(cfg["macd_fast"])
+        slow = int(cfg["macd_slow"])
+        sig_p = int(cfg["macd_signal_period"])
+        ef = _ema(closes, fast)
+        es = _ema(closes, slow)
+        ml = ef - es
+        msig = _ema(ml, sig_p)
+        precomp["hist_arr"] = ml - msig
+
+    if cfg.get("use_bb"):
+        bp = int(cfg["bb_period"])
+        bm = _sma(closes, bp)
+        bs = _std(closes, bp)
+        precomp["bb_low"] = bm - bs * float(cfg["bb_std_mult"])
+
+    if cfg.get("use_volume"):
+        precomp["vol_ma"] = _sma(vols, int(cfg["vol_ma_period"]))
+
+    if cfg.get("use_ma_cross"):
+        precomp["ma_short_arr"] = _sma(closes, int(cfg["ma_short"]))
+        precomp["ma_long_arr"] = _sma(closes, int(cfg["ma_long"]))
+
+    atr_arr = _atr(ohlcv, atr_period) if use_atr_sl else np.array([])
+
+    senal_fn = _build_signal_fn(cfg, precomp)
+
+    # ── Simulation loop ──
+    trades: list[tuple] = []
+    eur = capital
+    btc = 0.0
+    in_pos = False
+    entry_p = 0.0
+    entry_i = -1
+    tp_price = 0.0
+    sl_price_val = 0.0
+    total_fees = 0.0
+    last_sell_i = -999
+    confirming = 0
+    pending_buy = False
+
+    for i in range(n):
+        close_val = float(closes[i])
+
+        if in_pos:
+            exit_type = None
+            if close_val >= tp_price:
+                exit_type = "TP"
+            elif close_val <= sl_price_val:
+                exit_type = "SL"
+            elif i - entry_i >= max_candles:
+                exit_type = "MAX_TIME"
+
+            if exit_type:
+                pnl_pct = (close_val - entry_p) / entry_p * 100
+                fee = btc * close_val * fee_por_op
+                total_fees += fee
+                trades.append((entry_p, close_val, pnl_pct, i - entry_i, exit_type))
+                eur += btc * close_val - fee
+                btc = 0.0
+                in_pos = False
+                last_sell_i = i
+                confirming = 0
+                pending_buy = False
+                continue
+
+        if not in_pos and i - last_sell_i > min_between:
+            accion = senal_fn({}, i, {})  # signal fn uses closures, not these args
+            if accion == "buy":
+                if confirm <= 0:
+                    # Execute buy immediately
+                    invest = eur * invest_pct
+                    if invest >= MIN_TRADE:
+                        buy_fee = invest * fee_por_op
+                        total_fees += buy_fee
+                        btc = invest / close_val
+                        eur -= invest + buy_fee
+                        entry_p = close_val
+                        entry_i = i
+                        in_pos = True
+                        tp_price = entry_p * (1 + tp_rate)
+                        if use_atr_sl and i >= atr_period and len(atr_arr) > i and not np.isnan(atr_arr[i]):
+                            sl_price_val = entry_p - atr_arr[i] * atr_mult
+                        else:
+                            sl_price_val = entry_p * (1 - sl_rate)
+                elif not pending_buy:
+                    pending_buy = True
+                    confirming = 1
+                else:
+                    confirming += 1
+                    if confirming >= confirm:
+                        invest = eur * invest_pct
+                        if invest >= MIN_TRADE:
+                            buy_fee = invest * fee_por_op
+                            total_fees += buy_fee
+                            btc = invest / close_val
+                            eur -= invest + buy_fee
+                            entry_p = close_val
+                            entry_i = i
+                            in_pos = True
+                            tp_price = entry_p * (1 + tp_rate)
+                            if use_atr_sl and i >= atr_period and len(atr_arr) > i and not np.isnan(atr_arr[i]):
+                                sl_price_val = entry_p - atr_arr[i] * atr_mult
+                            else:
+                                sl_price_val = entry_p * (1 - sl_rate)
+                            pending_buy = False
+                            confirming = 0
+            else:
+                pending_buy = False
+                confirming = 0
+
+    if in_pos:
+        last_c = float(closes[-1])
+        pnl_pct = (last_c - entry_p) / entry_p * 100
+        fee = btc * last_c * fee_por_op
+        total_fees += fee
+        trades.append((entry_p, last_c, pnl_pct, n - entry_i, "END"))
+        eur += btc * last_c - fee
+
+    # ── Build results ──
+    num = len(trades)
+    pnl_neto = eur - capital
+
+    results: dict = {
+        "total_ops": num, "ganadoras": 0, "perdedoras": 0,
+        "winrate": 0.0, "ganancia_media_por_op": 0.0,
+        "ganancia_media_ganadoras": 0.0, "perdida_media_perdedoras": 0.0,
+        "mejor_operacion": 0.0, "peor_operacion": 0.0,
+        "pnl_neto": round(pnl_neto, 2), "comisiones": round(total_fees, 2),
+        "pnl_por_operacion": 0.0, "roi_mensual": 0.0, "pnl_mensual": 0.0,
+        "max_drawdown": 0.0, "score": 0.0,
+        "tiempo_medio_h": 0.0, "ops_por_mes": 0.0,
+    }
+
+    if num > 0:
+        gains_pct = [t[2] for t in trades]
+        wins = [g for g in gains_pct if g > 0]
+        losses = [g for g in gains_pct if g <= 0]
+        durs = [t[3] for t in trades]
+
+        results["ganadoras"] = len(wins)
+        results["perdedoras"] = len(losses)
+        results["winrate"] = round(len(wins) / num * 100, 2)
+        results["ganancia_media_por_op"] = round(float(np.mean(gains_pct)), 2)
+        results["ganancia_media_ganadoras"] = round(float(np.mean(wins)), 2) if wins else 0.0
+        results["perdida_media_perdedoras"] = round(float(np.mean(losses)), 2) if losses else 0.0
+        results["mejor_operacion"] = round(float(max(gains_pct)), 2)
+        results["peor_operacion"] = round(float(min(gains_pct)), 2)
+        results["pnl_por_operacion"] = round(pnl_neto / num, 2)
+        pnl_diario = pnl_neto / total_dias
+        results["pnl_mensual"] = round(pnl_diario * 30, 2)
+        results["roi_mensual"] = round((pnl_neto / capital * 100) / total_dias * 30, 2)
+        results["tiempo_medio_h"] = round(float(np.mean(durs)), 2)
+        results["ops_por_mes"] = round(num / total_dias * 30, 2)
+
+        # Drawdown
+        max_dd = 0.0
+        peak_bal = capital
+        bal = capital
+        for g in gains_pct:
+            bal += bal * (g / 100) * invest_pct
+            if bal > peak_bal:
+                peak_bal = bal
+            dd = (peak_bal - bal) / peak_bal * 100
+            if dd > max_dd:
+                max_dd = dd
+        results["max_drawdown"] = round(max_dd, 2)
+        # Score = € netos al mes (lo que realmente ganas)
+        results["score"] = round(results["pnl_mensual"], 2)
+
+    return {"cfg": cfg, "results": results, "index": index}
+
+
+def simular_random_search(
+    ohlcv: list[list[float]],
+    pre: dict,
+    num_iter: int,
+    capital: float = INITIAL_EUR,
+    fee_rate: float = FEE_RATE,
+    show_progress: bool = True,
+    workers: int | None = None,
+) -> tuple[list[ResultadoSim], list[dict]]:
+    """Prueba N combinaciones aleatorias en paralelo usando todos los cores disponibles.
+
+    Args:
+        ohlcv: velas OHLCV
+        pre: precalculos comunes
+        num_iter: número de iteraciones a ejecutar
+        capital: capital inicial en €
+        fee_rate: fee en % (ej: 0.08)
+        show_progress: mostrar progreso en consola
+        workers: número de workers paralelos (default: todos los CPUs)
+
+    Returns:
+        (resultados_ordenados_por_score, configs_correspondientes)
+    """
+    if workers is None:
+        workers = os.cpu_count() or 4
+
+    closes = pre["closes"]
+    highs = pre["highs"]
+    lows = pre["lows"]
+    vols = pre["vols"]
+    total_dias = len(ohlcv) / 24.0
+    n = len(ohlcv)
+
+    # ── Prepare args for each iteration ──
+    task_args = [
+        (ohlcv, closes, highs, lows, vols, total_dias, n, capital, fee_rate, idx)
+        for idx in range(num_iter)
+    ]
+
+    if show_progress:
+        print(f"  🚀 Ejecutando {num_iter} iteraciones en paralelo "
+              f"({workers} workers, {os.cpu_count() or '?'} CPUs)...")
+        print(f"  {'─'*55}")
+
+    resultados: list[ResultadoSim] = []
+    configs: list[dict] = []
+    completed = 0
+
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_simulate_one_iteration, args): args[-1]
+                   for args in task_args}
+
+        for future in as_completed(futures):
+            completed += 1
+            data = future.result()
+            cfg = data["cfg"]
+            res = data["results"]
+            idx = data["index"]
+
+            # ── Build ResultadoSim ──
+            desc_parts = []
+            for k in sorted(cfg):
+                v = cfg[k]
+                desc_parts.append(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}")
+
+            r = ResultadoSim(
+                estrategia=f"RandomSearch #{idx + 1}",
+                descripcion=" | ".join(desc_parts),
+            )
+            r.total_ops = res["total_ops"]
+            r.ganadoras = res["ganadoras"]
+            r.perdedoras = res["perdedoras"]
+            r.winrate = res["winrate"]
+            r.ganancia_media_por_op = res["ganancia_media_por_op"]
+            r.ganancia_media_ganadoras = res["ganancia_media_ganadoras"]
+            r.perdida_media_perdedoras = res["perdida_media_perdedoras"]
+            r.mejor_operacion = res["mejor_operacion"]
+            r.peor_operacion = res["peor_operacion"]
+            r.pnl_neto = res["pnl_neto"]
+            r.comisiones = res["comisiones"]
+            r.pnl_por_operacion = res["pnl_por_operacion"]
+            r.roi_mensual = res["roi_mensual"]
+            r.pnl_mensual = res["pnl_mensual"]
+            r.max_drawdown = res["max_drawdown"]
+            r.score = res["score"]
+            r.tiempo_medio_h = res["tiempo_medio_h"]
+            r.dias_simulados = total_dias
+            r.ops_por_mes = res["ops_por_mes"]
+            r.pnl_diario = r.pnl_neto / total_dias if total_dias > 0 else 0
+            r.roi_total = r.pnl_neto / capital * 100 if capital > 0 else 0
+            r.roi_diario = r.roi_total / total_dias if total_dias > 0 else 0
+            r.tiempo_maximo_h = 0.0
+            r.pnl_bruto = r.pnl_neto + r.comisiones
+
+            resultados.append(r)
+            configs.append(cfg)
+
+            if show_progress:
+                enabled = [k for k in ("use_rsi", "use_macd", "use_bb",
+                                       "use_volume", "use_ma_cross", "use_momentum")
+                           if cfg.get(k)]
+                print(f"  ✅ [{completed}/{num_iter}] #{idx + 1}  "
+                      f"tp={cfg['tp_percent']:.1f}%  sl={cfg['sl_percent']:.1f}%  "
+                      f"activos: {', '.join(enabled) if enabled else 'always'}")
+                print(f"       {r.total_ops} ops | WR={r.winrate:.1f}% | "
+                      f"%/op={r.ganancia_media_por_op:+.2f} | "
+                      f"ROI/mes={r.roi_mensual:+.2f}% | Score={r.score:.2f}")
+
+    # ── Persistir en CSV acumulativo ──
+    run_tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    history = _load_csv_history()
+    global_id_start = len(history) + 1
+
+    new_rows = []
+    for i, (r, cfg) in enumerate(zip(resultados, configs)):
+        row = _entry_to_csv_row(cfg, r, fee_rate, run_tag, global_id_start + i)
+        new_rows.append(row)
+
+    # Append new rows to existing CSV
+    all_rows = history + new_rows
+    _write_csv(all_rows)
+
+    if show_progress:
+        size_kb = RANDOM_SEARCH_CSV.stat().st_size / 1024 if RANDOM_SEARCH_CSV.exists() else 0
+        print(f"\n  💾 {num_iter} iteraciones guardadas en {RANDOM_SEARCH_CSV.name} ({size_kb:.0f} KB)")
+        print(f"     Total acumulado: {len(all_rows)} combinaciones")
+
+    # ── Construir ResultadoSim desde TODO el histórico ──
+    all_results, all_configs = _csv_rows_to_resultados(all_rows)
+
+    # Sort by score descending
+    sorted_pairs = sorted(zip(all_results, all_configs), key=lambda x: x[0].score, reverse=True)
+    sorted_results = [p[0] for p in sorted_pairs]
+    sorted_configs = [p[1] for p in sorted_pairs]
+
+    return sorted_results, sorted_configs
+
+
+def _csv_rows_to_resultados(rows: list[dict]) -> tuple[list[ResultadoSim], list[dict]]:
+    """Convierte filas planas de CSV a listas de ResultadoSim y configs."""
+    resultados: list[ResultadoSim] = []
+    configs: list[dict] = []
+
+    for row in rows:
+        gid = row.get("global_id", 0)
+        ts = str(row.get("timestamp", ""))[:10]
+
+        # Extract params (only keys in _CSV_PARAM_COLS)
+        params = {}
+        for k in _CSV_PARAM_COLS:
+            val = row.get(k, "")
+            if val != "":
+                params[k] = val
+
+        r = ResultadoSim(
+            estrategia=f"#{gid} ({ts})",
+            descripcion=" | ".join(
+                f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
+                for k, v in sorted(params.items())
+            ),
+        )
+        r.total_ops = int(row.get("total_ops", 0))
+        r.ganadoras = int(row.get("ganadoras", 0))
+        r.perdedoras = int(row.get("perdedoras", 0))
+        r.winrate = float(row.get("winrate", 0))
+        r.ganancia_media_por_op = float(row.get("ganancia_media_por_op", 0))
+        r.ganancia_media_ganadoras = float(row.get("ganancia_media_ganadoras", 0))
+        r.perdida_media_perdedoras = float(row.get("perdida_media_perdedoras", 0))
+        r.mejor_operacion = float(row.get("mejor_operacion", 0))
+        r.peor_operacion = float(row.get("peor_operacion", 0))
+        r.pnl_neto = float(row.get("pnl_neto", 0))
+        r.pnl_por_operacion = float(row.get("pnl_por_operacion", 0))
+        r.roi_mensual = float(row.get("roi_mensual", 0))
+        r.pnl_mensual = float(row.get("pnl_mensual", 0))
+        r.max_drawdown = float(row.get("max_drawdown", 0))
+        # Score = € netos al mes (lo que realmente ganas), calculado al vuelo
+        r.score = r.pnl_mensual
+        r.tiempo_medio_h = float(row.get("tiempo_medio_h", 0))
+        r.ops_por_mes = float(row.get("ops_por_mes", 0))
+
+        resultados.append(r)
+        configs.append(params)
+
+    return resultados, configs
+
+
+def imprimir_random_top3(resultados: list[ResultadoSim], configs: list[dict]):
+    """Imprime las 3 mejores combinaciones (del histórico + sesión actual).
+
+    Solo entran en el ranking las que tienen ≥ MIN_OPS_FOR_RANKING operaciones.
+    """
+    # Filter by minimum operations
+    qualifying = [(r, c) for r, c in zip(resultados, configs)
+                  if r.total_ops >= MIN_OPS_FOR_RANKING]
+
+    top3_pairs = qualifying[:3]
+    if not top3_pairs:
+        print(f"\n  ⚠️  Ninguna combinación alcanza las {MIN_OPS_FOR_RANKING} ops mínimas para el ranking.")
+        return
+
+    top3_r = [p[0] for p in top3_pairs]
+    top3_c = [p[1] for p in top3_pairs]
+
+    # Count totals from CSV
+    total_count = 0
+    qualifying_count = len(qualifying)
+    if RANDOM_SEARCH_CSV.exists():
+        with open(RANDOM_SEARCH_CSV) as f:
+            total_count = sum(1 for _ in f) - 1  # subtract header
+
+    print(f"\n{'='*80}")
+    print(f"  🏆 TOP 3 MEJORES COMBINACIONES (Random Search)")
+    print(f"     {total_count} total | {qualifying_count} con ≥{MIN_OPS_FOR_RANKING} ops")
+    print(f"{'='*80}")
+    print(f"  {'#':<3} {'ID (fecha)':<16} {'Ops':<5} {'WR%':<6} {'%/op':<7} {'€/op':<8}"
+          f" {'ROI/mes':<9} {'€/mes':<9} {'DD%':<7} {'Score':<8}")
+    print(f"  {'─'*83}")
+
+    for idx, (r, c) in enumerate(zip(top3_r, top3_c)):
+        icon = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
+        print(f"  {icon} {r.estrategia:<16} {r.total_ops:<5} {r.winrate:<6.1f}"
+              f" {r.ganancia_media_por_op:<+7.2f} {r.pnl_por_operacion:<+8.2f}"
+              f" {r.roi_mensual:<+9.2f} {r.pnl_mensual:<+9.2f}"
+              f" {r.max_drawdown:<7.2f} {r.score:<8.2f}")
+
+    print(f"\n{'─'*80}")
+    print(f"  📋 DETALLE DE PARÁMETROS DEL TOP 3")
+    print(f"{'─'*80}")
+
+    for idx, (r, c) in enumerate(zip(top3_r, top3_c)):
+        icon = "🥇" if idx == 0 else "🥈" if idx == 1 else "🥉"
+        print(f"\n  {icon} {r.estrategia} — Score: {r.score:.2f} | WR: {r.winrate:.1f}% | "
+              f"ROI/mes: {r.roi_mensual:+.2f}% | Ops: {r.total_ops}")
+
+        # Group params by category
+        risk_keys = ["tp_percent", "sl_percent", "invest_percent", "max_position_candles",
+                      "min_candles_between", "confirmation_candles"]
+        rsi_keys = ["use_rsi", "rsi_period", "rsi_oversold"]
+        macd_keys = ["use_macd", "macd_fast", "macd_slow", "macd_signal_period", "macd_hist_min"]
+        bb_keys = ["use_bb", "bb_period", "bb_std_mult", "bb_position_pct"]
+        vol_keys = ["use_volume", "vol_ma_period", "vol_multiplier"]
+        ma_keys = ["use_ma_cross", "ma_short", "ma_long"]
+        atr_keys = ["use_atr_sl", "atr_period", "atr_mult_sl"]
+        mom_keys = ["use_momentum", "momentum_period", "momentum_threshold"]
+
+        def _fmt(v):
+            if isinstance(v, bool):
+                return "SÍ" if v else "NO"
+            if isinstance(v, float):
+                return f"{v:.2f}"
+            return str(v)
+
+        def _print_group(title: str, keys: list[str]):
+            vals = []
+            for k in keys:
+                if k in c:
+                    vals.append(f"{k}={_fmt(c[k])}")
+            if vals:
+                print(f"    {title}: {'  '.join(vals)}")
+
+        _print_group("Riesgo", risk_keys)
+        _print_group("RSI", rsi_keys)
+        _print_group("MACD", macd_keys)
+        _print_group("Bollinger", bb_keys)
+        _print_group("Volumen", vol_keys)
+        _print_group("MA Cross", ma_keys)
+        _print_group("ATR", atr_keys)
+        _print_group("Momentum", mom_keys)
+
+
 # ── Registry de estrategias ──
 
 ESTRATEGIAS: list[dict] = [
@@ -621,6 +1409,14 @@ ESTRATEGIAS: list[dict] = [
         "senal": None,  # usa simulación dedicada
         "config": {"invest_percent": 45.0, "drop_2nd_entry_pct": 2.0, "tp_percent": 1.0, "sl_percent": 1.0, "max_position_candles": 12, "fee_percent": 0.0},
         "custom_sim": True,
+    },
+    {
+        "id": "random_search",
+        "nombre": "🎲 Random Search (N iteraciones)",
+        "senal": None,  # usa simulación dedicada
+        "config": {"fee_percent": 0.0},
+        "custom_sim": True,
+        "random_search": True,
     },
 ]
 
@@ -976,6 +1772,8 @@ def ejecutar(capital: float = INITIAL_EUR, fee_rate: float = FEE_RATE) -> list[R
 
     resultados = []
     for est in ESTRATEGIAS:
+        if est.get("random_search"):
+            continue  # skip interactive strategies in batch mode
         if est.get("custom_sim"):
             r = simular_macd_hist_50(ohlcv, pre, est["config"], capital=capital, fee_rate=fee_rate)
         else:

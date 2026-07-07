@@ -14,6 +14,7 @@ import sys
 from src.simulador import (
     cargar_velas, precalcular, imprimir_resultado,
     simular_estrategia, simular_macd_hist_50,
+    simular_random_search, imprimir_random_top3,
     ESTRATEGIAS, DATA_FILE, INITIAL_EUR,
 )
 
@@ -90,6 +91,8 @@ def main():
             print(f"  {'─'*55}")
             resultados = []
             for est in ESTRATEGIAS:
+                if est.get("random_search"):
+                    continue  # skip interactive strategies in batch mode
                 print(f"  ⏳ {est['nombre']} ...", end=" ", flush=True)
                 if est.get("custom_sim"):
                     r = simular_macd_hist_50(ohlcv, pre, est["config"],
@@ -124,13 +127,38 @@ def main():
 
         est = ESTRATEGIAS[idx]
         print(f"\n  ⏳ Simulando: {est['nombre']} (fee={fee_pct:.2f}%) ...")
-        if est.get("custom_sim"):
+
+        # ── 🎲 Random Search ──
+        if est.get("random_search"):
+            try:
+                n_input = input(f"  Número de iteraciones (combinaciones aleatorias): ").strip()
+                num_iter = int(n_input)
+                if num_iter <= 0:
+                    print("  ❌ Debe ser > 0")
+                    continue
+            except (EOFError, KeyboardInterrupt):
+                print("\n👋 ¡Hasta luego!")
+                break
+            except ValueError:
+                print("  ❌ Número no válido")
+                continue
+
+            resultados, configs = simular_random_search(
+                ohlcv, pre, num_iter,
+                capital=INITIAL_EUR, fee_rate=fee_pct,
+            )
+            imprimir_random_top3(resultados, configs)
+
+        # ── Estrategia con simulación dedicada (ej: MACD Hist -50) ──
+        elif est.get("custom_sim"):
             r = simular_macd_hist_50(ohlcv, pre, est["config"],
                                      capital=INITIAL_EUR, fee_rate=fee_pct)
+            imprimir_resultado(r)
+
+        # ── Estrategia estándar ──
         else:
             r = simular_estrategia(ohlcv, pre, est, capital=INITIAL_EUR, fee_rate=fee_pct)
-
-        imprimir_resultado(r)
+            imprimir_resultado(r)
 
 
 if __name__ == "__main__":
