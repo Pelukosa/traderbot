@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SIMON — Simulador de Estrategias</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <h1>📊 SIMON</h1>
+    <p class="subtitle" id="subtitle">Cargando datos...</p>
+
+    <div class="controls">
+      <select id="sel">
+        <option value="">-- Seleccionar estrategia --</option>
+      </select>
+      <button id="btnGenerar">▶ Generar</button>
+    </div>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#3fb950"></span> Compra</span>
+      <span><span class="dot" style="background:#f85149"></span> Venta</span>
+      <span><span class="dot" style="background:#d29922"></span> RSI(14)</span>
+      <span><span class="dot" style="background:#58a6ff"></span> MACD</span>
+      <span><span class="dot" style="background:#f0883e"></span> Señal MACD</span>
+      <span><span class="dot" style="background:none;border:1px dashed #f8514988;width:10px;height:1px;display:inline-block"></span> RSI 30</span>
+    </div>
+
+    <div id="chart"></div>
+    <div id="cards"><div class="empty">Selecciona una estrategia y pulsa Generar</div></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
