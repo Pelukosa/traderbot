@@ -39,6 +39,26 @@ h1 {
   border-color: #58a6ff;
   outline: none;
 }
+.controls .fee-label {
+  font-size: 12px;
+  color: #8b949e;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.controls .fee-label input {
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  padding: 5px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+}
+.controls .fee-label input:focus {
+  border-color: #58a6ff;
+  outline: none;
+}
 .controls button {
   background: #238636;
   color: #fff;

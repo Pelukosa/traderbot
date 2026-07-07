@@ -12,6 +12,8 @@ let estrategias = [];
 // ── Elementos DOM ──
 const sel = document.getElementById("sel");
 const btn = document.getElementById("btnGenerar");
+const feeTakerEl = document.getElementById("feeTaker");
+const capitalEl = document.getElementById("capital");
 const subtitle = document.getElementById("subtitle");
 const cardsEl = document.getElementById("cards");
 
@@ -83,13 +85,13 @@ function dibujarVacio() {
       margin: { l: 50, r: 20, b: 30, t: 10 },
       dragmode: "zoom",
       hovermode: "x unified",
-      xaxis: { type: "date", gridcolor: "#21262d", rangeslider: { visible: false } },
-      yaxis: { domain: [0.28, 1], gridcolor: "#21262d", side: "right" },
-      yaxis2: { domain: [0.14, 0.25], gridcolor: "#21262d", side: "right", range: [0, 100] },
-      yaxis3: { domain: [0, 0.11], gridcolor: "#21262d", side: "right" },
+      xaxis: { type: "date", gridcolor: "#21262d", rangeslider: { visible: true, thickness: 0.05 } },
+      yaxis: { domain: [0.28, 1], gridcolor: "#21262d", side: "right", fixedrange: false },
+      yaxis2: { domain: [0.14, 0.25], gridcolor: "#21262d", side: "right", range: [0, 100], fixedrange: false },
+      yaxis3: { domain: [0, 0.11], gridcolor: "#21262d", side: "right", fixedrange: false },
       legend: { orientation: "h", y: 1.02, x: 0, font: { size: 9 } },
     },
-    { responsive: true, displayModeBar: false },
+    { responsive: true, scrollZoom: true, displayModeBar: true, modeBarButtonsToRemove: ["lasso2d", "select2d"], displaylogo: false },
   );
 }
 
@@ -109,53 +111,34 @@ function generar() {
     v.c >= v.o ? "#3fb95044" : "#f8514944",
   );
 
-  // ── Shapes y anotaciones de trades ──
+  // ── Puntos de compra/venta y líneas horizontales ──
+  const buyTimes = [];
+  const buyPrices = [];
+  const buyTexts = [];
+  const sellTimes = [];
+  const sellPrices = [];
+  const sellTexts = [];
   const shapes = [];
-  const annots = [];
 
   trades.forEach((t) => {
     const bi = t.buy_idx;
     const si = t.sell_idx;
     if (bi < 0 || si < 0 || bi >= ts.length || si >= ts.length) return;
 
-    // Flecha compra (verde hacia arriba)
-    shapes.push({
-      type: "line",
-      xref: "x",
-      yref: "y",
-      x0: ts[bi],
-      y0: t.entry_price * 0.97,
-      x1: ts[bi],
-      y1: t.entry_price * 1.005,
-      line: { color: "#3fb950", width: 2 },
-    });
-    annots.push({
-      x: ts[bi],
-      y: t.entry_price * 0.955,
-      text: "COMPRA " + t.gain_pct.toFixed(2) + "%",
-      showarrow: false,
-      font: { color: "#3fb950", size: 9 },
-      xanchor: "center",
-    });
+    buyTimes.push(ts[bi]);
+    buyPrices.push(t.entry_price);
+    buyTexts.push("Compra " + t.entry_price.toFixed(0) + "€");
 
-    // Flecha venta (roja hacia abajo)
+    sellTimes.push(ts[si]);
+    sellPrices.push(t.exit_price);
+    sellTexts.push("Venta " + t.exit_price.toFixed(0) + "€ → " + (t.gain_pct >= 0 ? "+" : "") + t.gain_pct.toFixed(2) + "%");
+
+    // Línea horizontal discontinua al nivel de entrada
     shapes.push({
-      type: "line",
-      xref: "x",
-      yref: "y",
-      x0: ts[si],
-      y0: t.exit_price * 1.03,
-      x1: ts[si],
-      y1: t.exit_price * 0.995,
-      line: { color: "#f85149", width: 2 },
-    });
-    annots.push({
-      x: ts[si],
-      y: t.exit_price * 1.045,
-      text: "VENTA (" + t.exit_type + ")",
-      showarrow: false,
-      font: { color: "#f85149", size: 9 },
-      xanchor: "center",
+      type: "line", xref: "x", yref: "y",
+      x0: ts[bi], y0: t.entry_price,
+      x1: ts[si], y1: t.entry_price,
+      line: { color: "#3fb95066", width: 1, dash: "dot" },
     });
   });
 
@@ -172,6 +155,34 @@ function generar() {
       yaxis: "y",
       increasing: { line: { color: "#3fb950" } },
       decreasing: { line: { color: "#f85149" } },
+    },
+    // Marcadores de compra (triángulo verde hacia arriba)
+    {
+      x: buyTimes,
+      y: buyPrices,
+      type: "scatter",
+      mode: "markers+text",
+      name: "Compra",
+      yaxis: "y",
+      marker: { symbol: "triangle-up", size: 12, color: "#3fb950", line: { width: 1, color: "#fff" } },
+      text: buyTexts,
+      textposition: "top center",
+      textfont: { size: 9, color: "#3fb950" },
+      showlegend: true,
+    },
+    // Marcadores de venta (triángulo rojo hacia abajo)
+    {
+      x: sellTimes,
+      y: sellPrices,
+      type: "scatter",
+      mode: "markers+text",
+      name: "Venta",
+      yaxis: "y",
+      marker: { symbol: "triangle-down", size: 12, color: "#f85149", line: { width: 1, color: "#fff" } },
+      text: sellTexts,
+      textposition: "bottom center",
+      textfont: { size: 9, color: "#f85149" },
+      showlegend: true,
     },
     {
       x: ts,
@@ -236,11 +247,29 @@ function generar() {
       name: "Histograma",
       yaxis: "y3",
       marker: {
-        color: velas.map((v) =>
-          v.hist && v.hist >= 0 ? "#3fb95066" : "#f8514966",
-        ),
+        color: (() => {
+          // Coloreado dinámico del histograma MACD:
+          //   - Barras positivas: verde fuerte si crece, verde sutil si decrece
+          //   - Barras negativas: rojo fuerte si cae más, rojo sutil si remonta
+          const GREEN_STRONG = "#3fb950";
+          const GREEN_FADE = "#3fb95033";
+          const RED_STRONG = "#f85149";
+          const RED_FADE = "#f8514933";
+          return velas.map((v, i) => {
+            if (v.hist === null || v.hist === undefined) return "transparent";
+            const prev = i > 0 ? velas[i - 1].hist : null;
+            if (v.hist >= 0) {
+              // Territorio positivo
+              if (prev === null) return GREEN_STRONG;
+              return v.hist >= prev ? GREEN_STRONG : GREEN_FADE;
+            } else {
+              // Territorio negativo
+              if (prev === null) return RED_STRONG;
+              return v.hist <= prev ? RED_STRONG : RED_FADE;
+            }
+          });
+        })(),
       },
-      opacity: 0.4,
     },
   ];
 
@@ -254,37 +283,81 @@ function generar() {
       margin: { l: 50, r: 20, b: 30, t: 10 },
       dragmode: "zoom",
       hovermode: "x unified",
-      xaxis: { type: "date", gridcolor: "#21262d", rangeslider: { visible: false } },
-      yaxis: { domain: [0.28, 1], gridcolor: "#21262d", side: "right" },
-      yaxis2: { domain: [0.14, 0.25], gridcolor: "#21262d", side: "right", range: [0, 100] },
-      yaxis3: { domain: [0, 0.11], gridcolor: "#21262d", side: "right" },
+      xaxis: { type: "date", gridcolor: "#21262d", rangeslider: { visible: true, thickness: 0.05 } },
+      yaxis: { domain: [0.28, 1], gridcolor: "#21262d", side: "right", fixedrange: false },
+      yaxis2: { domain: [0.14, 0.25], gridcolor: "#21262d", side: "right", range: [0, 100], fixedrange: false },
+      yaxis3: { domain: [0, 0.11], gridcolor: "#21262d", side: "right", fixedrange: false },
       legend: { orientation: "h", y: 1.02, x: 0, font: { size: 9 } },
       shapes,
-      annotations: annots,
     },
-    { responsive: true, displayModeBar: false },
+    { responsive: true, scrollZoom: true, displayModeBar: true, modeBarButtonsToRemove: ["lasso2d", "select2d"], displaylogo: false },
   );
 
-  // ── Cards ──
+  // ── Cards con cálculo de comisiones ──
+  const SIM_CAPITAL = 120; // capital con el que se ejecutó la simulación
+  const CAPITAL = parseFloat(capitalEl.value) || 120;
+  const capitalPorTrade = CAPITAL; // 100% del capital por operación
+  const escala = CAPITAL / SIM_CAPITAL; // factor de escala para el PnL bruto
+  const takerPct = parseFloat(feeTakerEl.value) || 0;
+
+  // Calcular comisiones por trade (taker en entrada y salida)
+  let totalComision = 0;
+  let tradesNetos = 0;
+  let ganadorasNetas = 0;
+  let perdedorasNetas = 0;
+  let sumaGananciaNeta = 0;
+  let mejorNeta = -Infinity;
+  let peorNeta = Infinity;
+
+  trades.forEach((t) => {
+    const entradaFeeEur = capitalPorTrade * (takerPct / 100);
+    const salidaFeeEur = capitalPorTrade * (takerPct / 100);
+    const comisionTrade = entradaFeeEur + salidaFeeEur;
+    totalComision += comisionTrade;
+
+    const gananciaBrutaEur = capitalPorTrade * (t.gain_pct / 100);
+    const gananciaNetaEur = gananciaBrutaEur - comisionTrade;
+    const gananciaNetaPct = (gananciaNetaEur / capitalPorTrade) * 100;
+
+    sumaGananciaNeta += gananciaNetaPct;
+    if (gananciaNetaPct >= 0) {
+      ganadorasNetas++;
+    } else {
+      perdedorasNetas++;
+    }
+    tradesNetos++;
+    if (gananciaNetaPct > mejorNeta) mejorNeta = gananciaNetaPct;
+    if (gananciaNetaPct < peorNeta) peorNeta = gananciaNetaPct;
+  });
+
+  const pnlBrutoEscalado = r.pnl_neto * escala;
+  const pnlNetoComision = pnlBrutoEscalado - totalComision;
+  const pnlMensualComision = pnlNetoComision * (30 / r.dias_simulados);
+  const roiMensualComision = (pnlNetoComision / CAPITAL) * 100;
+  const roiDiarioComision = roiMensualComision / 30;
+  const winrateNeto = tradesNetos > 0 ? (ganadorasNetas / tradesNetos) * 100 : 0;
+
   cardsEl.innerHTML = `
     <div class="card top">
       <h3>${r.estrategia}</h3>
       <div class="row"><span class="l">Operaciones</span><span class="v">${r.total_ops} (${fm(r.ops_por_mes)}/mes)</span></div>
-      <div class="row"><span class="l">Win rate</span><span class="v ${cl(r.winrate)}">${fm(r.winrate)}% (${r.ganadoras}G/${r.perdedoras}P)</span></div>
-      <div class="row"><span class="l">%/op media</span><span class="v ${cl(r.ganancia_media_por_op)}">${fm(r.ganancia_media_por_op)}%</span></div>
+      <div class="row"><span class="l">Win rate bruto</span><span class="v ${cl(r.winrate)}">${fm(r.winrate)}% (${r.ganadoras}G/${r.perdedoras}P)</span></div>
+      <div class="row"><span class="l">Win rate neto</span><span class="v ${cl(winrateNeto)}">${fm(winrateNeto)}% (${ganadorasNetas}G/${perdedorasNetas}P)</span></div>
+      <div class="row"><span class="l">%/op media bruta</span><span class="v ${cl(r.ganancia_media_por_op)}">${fm(r.ganancia_media_por_op)}%</span></div>
+      <div class="row"><span class="l">%/op media neta</span><span class="v ${cl(sumaGananciaNeta/tradesNetos)}">${fm(sumaGananciaNeta/tradesNetos)}%</span></div>
       <div class="row"><span class="l">Ganadoras media</span><span class="v pos">${fm(r.ganancia_media_ganadoras)}%</span></div>
       ${r.perdedoras > 0 ? '<div class="row"><span class="l">Perdedoras media</span><span class="v neg">' + fm(r.perdida_media_perdedoras) + '%</span></div>' : ""}
-      <div class="row"><span class="l">Mejor / Peor</span><span class="v">${fm(r.mejor_operacion)}% / ${fm(r.peor_operacion)}%</span></div>
+      <div class="row"><span class="l">Mejor / Peor (neto)</span><span class="v">${fm(mejorNeta)}% / ${fm(peorNeta)}%</span></div>
       <div class="row"><span class="l">Tiempo medio</span><span class="v">${fm(r.tiempo_medio_h)}h</span></div>
     </div>
     <div class="card top">
       <h3>Rentabilidad</h3>
-      <div class="row"><span class="l">PnL neto</span><span class="v ${cl(r.pnl_neto)}">${fm(r.pnl_neto)}€</span></div>
-      <div class="row"><span class="l">PnL/op</span><span class="v ${cl(r.pnl_por_operacion)}">${fm(r.pnl_por_operacion)}€</span></div>
-      <div class="row"><span class="l">PnL/dia</span><span class="v ${cl(r.pnl_diario)}">${fm(r.pnl_diario)}€</span></div>
-      <div class="row"><span class="l">PnL/mes</span><span class="v ${cl(r.pnl_mensual)}">${fm(r.pnl_mensual)}€</span></div>
-      <div class="row"><span class="l">ROI mensual</span><span class="v ${cl(r.roi_mensual)}">${fm(r.roi_mensual)}%</span></div>
-      <div class="row"><span class="l">ROI diario</span><span class="v ${cl(r.roi_diario)}">${fm(r.roi_diario)}%</span></div>
+      <div class="row"><span class="l">PnL bruto</span><span class="v ${cl(pnlBrutoEscalado)}">${fm(pnlBrutoEscalado)}€</span></div>
+      <div class="row"><span class="l">Comisiones</span><span class="v neg">-${fm(totalComision)}€</span></div>
+      <div class="row" style="border-top:1px solid #21262d;margin-top:4px;padding-top:6px"><span class="l" style="font-weight:bold">PnL neto</span><span class="v ${cl(pnlNetoComision)}" style="font-weight:bold">${fm(pnlNetoComision)}€</span></div>
+      <div class="row"><span class="l">PnL/mes (neto)</span><span class="v ${cl(pnlMensualComision)}">${fm(pnlMensualComision)}€</span></div>
+      <div class="row"><span class="l">ROI mensual (neto)</span><span class="v ${cl(roiMensualComision)}">${fm(roiMensualComision)}%</span></div>
+      <div class="row"><span class="l">ROI diario (neto)</span><span class="v ${cl(roiDiarioComision)}">${fm(roiDiarioComision)}%</span></div>
       <div class="row"><span class="l">Max drawdown</span><span class="v neg">${fm(r.max_drawdown)}%</span></div>
       <div class="row"><span class="l">Score</span><span class="v ${cl(r.score)}">${fm(r.score)}</span></div>
     </div>
@@ -292,9 +365,10 @@ function generar() {
       <h3>Config</h3>
       <div style="font-size:11px;color:#8b949e;white-space:pre-wrap;">${r.descripcion || "-"}</div>
       <div style="margin-top:8px;font-size:11px;color:#8b949e;">
-        Capital: 120€<br>
-        Comisiones: ${fm(r.comisiones)}€<br>
-        ${r.total_ops} trades en ${r.dias_simulados} dias
+        Capital: ${CAPITAL}€ — Inversión/op: ${fm(capitalPorTrade)}€<br>
+        Comisión: ${fm(takerPct)}% (entrada + salida)<br>
+        Comisiones totales: ${fm(totalComision)}€<br>
+        ${r.total_ops} trades en ${fm(r.dias_simulados)} dias
       </div>
     </div>
   `;
