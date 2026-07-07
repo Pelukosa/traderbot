@@ -513,6 +513,124 @@ def simular_estrategia(
     return r
 
 
+def simular_estrategia_con_indices(
+    ohlcv: list[list[float]],
+    pre: dict,
+    est: dict,
+    capital: float = INITIAL_EUR,
+    fee_rate: float = FEE_RATE,
+) -> tuple[ResultadoSim, list[tuple]]:
+    """Como simular_estrategia pero los trades incluyen (entry_idx, sell_idx)."""
+    cfg = est["config"]
+    senal_fn = est["senal"]
+    sl_rate = cfg.get("sl_percent", 4.95) / 100.0
+    trail_min = cfg.get("trailing_min_gain", 1.0)
+    fee_por_op = fee_rate / 100.0 if fee_rate >= 1 else fee_rate
+
+    closes = pre["closes"]
+
+    trades: list[tuple] = []  # (entry_price, exit_price, gain_%, duration_h, tipo, buy_idx, sell_idx)
+    eur = capital; btc = 0.0
+    in_pos = False; entry_p = 0.0; entry_i = -1
+    highest = 0.0; sl_price = None
+    total_fees = 0.0
+
+    for i in range(len(ohlcv)):
+        close = float(closes[i])
+
+        if in_pos:
+            exit_type = None
+            if sl_price is not None and close <= sl_price:
+                exit_type = "SL"
+            elif close > highest:
+                highest = close
+                gain = (close - entry_p) / entry_p * 100
+                if gain > trail_min:
+                    trail_pct = gain * TRAIL_RETAIN
+                    new_sl = entry_p * (1 + trail_pct / 100.0)
+                    if sl_price is None or new_sl > sl_price: sl_price = new_sl
+            if i - entry_i >= MAX_POSITION_CANDLES:
+                exit_type = "MAX_TIME"
+            if sl_price is not None and close <= sl_price:
+                exit_type = "SL"
+            elif i - entry_i >= MAX_POSITION_CANDLES:
+                exit_type = "MAX_TIME"
+
+            if exit_type:
+                pnl_pct = (close - entry_p) / entry_p * 100
+                fee = btc * close * fee_por_op
+                total_fees += fee
+                trades.append((entry_p, close, pnl_pct, i - entry_i, exit_type, entry_i, i))
+                eur += btc * close - fee; btc = 0.0; in_pos = False
+                continue
+
+        if not in_pos:
+            accion = senal_fn(pre, i, cfg)
+            if accion == "buy":
+                invest = eur * INVEST_PCT / 100.0
+                if invest >= MIN_TRADE:
+                    buy_fee = invest * fee_por_op
+                    total_fees += buy_fee
+                    btc = invest / close
+                    eur -= invest + buy_fee
+                    entry_p = close; entry_i = i
+                    highest = close; sl_price = entry_p * (1 - sl_rate)
+                    in_pos = True
+
+    if in_pos:
+        last_c = float(closes[-1])
+        pnl_pct = (last_c - entry_p) / entry_p * 100
+        fee = btc * last_c * fee_por_op
+        total_fees += fee
+        trades.append((entry_p, last_c, pnl_pct, len(ohlcv) - entry_i, "END", entry_i, len(ohlcv) - 1))
+        eur += btc * last_c - fee
+
+    # Construir resultado igual que simular_estrategia
+    r = ResultadoSim(
+        estrategia=est["nombre"],
+        descripcion=" | ".join(f"{k}={v}" for k,v in sorted(cfg.items())),
+    )
+    num = len(trades)
+    total_dias = len(ohlcv) / 24.0
+    pnl_neto = eur - capital
+
+    if num == 0:
+        r.dias_simulados = total_dias
+        r.comisiones = total_fees
+        return r, []
+
+    gains_pct = [t[2] for t in trades]
+    wins = [g for g in gains_pct if g > 0]
+    losses = [g for g in gains_pct if g <= 0]
+    durs = [t[3] for t in trades]
+    pnl_bruto = pnl_neto + total_fees
+
+    r.total_ops = num; r.ganadoras = len(wins); r.perdedoras = len(losses)
+    r.winrate = len(wins) / num * 100
+    r.ganancia_media_por_op = float(np.mean(gains_pct))
+    r.ganancia_media_ganadoras = float(np.mean(wins)) if wins else 0.0
+    r.perdida_media_perdedoras = float(np.mean(losses)) if losses else 0.0
+    r.mejor_operacion = float(max(gains_pct)); r.peor_operacion = float(min(gains_pct))
+    r.pnl_bruto = pnl_bruto; r.pnl_neto = pnl_neto; r.comisiones = total_fees
+    r.pnl_por_operacion = pnl_neto / num; r.pnl_diario = pnl_neto / total_dias
+    r.pnl_mensual = r.pnl_diario * 30
+    r.roi_total = pnl_neto / capital * 100; r.roi_diario = r.roi_total / total_dias
+    r.roi_mensual = r.roi_diario * 30
+    r.tiempo_medio_h = float(np.mean(durs)); r.tiempo_maximo_h = float(max(durs))
+    r.dias_simulados = total_dias; r.ops_por_mes = num / total_dias * 30
+
+    max_dd = 0.0; peak = capital; bal = capital
+    for g in gains_pct:
+        bal += bal * (g / 100) * INVEST_PCT / 100
+        if bal > peak: peak = bal
+        dd = (peak - bal) / peak * 100
+        if dd > max_dd: max_dd = dd
+    r.max_drawdown = max_dd
+    r.score = r.roi_mensual * 0.4 + r.winrate * 0.15 + r.pnl_por_operacion * 0.3 - r.max_drawdown * 0.15
+
+    return r, trades
+
+
 def imprimir_resultado(r: ResultadoSim):
     """Imprime un resultado con formato limpio."""
     print(f"\n{'─'*50}")
