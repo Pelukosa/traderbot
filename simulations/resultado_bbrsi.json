@@ -1,0 +1,33 @@
+{
+  "strategy": "BB+RSI",
+  "config": {
+    "rsi_max": 35,
+    "sl_percent": 4.95,
+    "trailing_min_gain": 1.05,
+    "fee_percent": 0.0
+  },
+  "capital": 120.0,
+  "total_trades": 10,
+  "wins": 6,
+  "losses": 4,
+  "win_rate": 60.0,
+  "roi_total": 5.11,
+  "roi_diario": 0.17,
+  "roi_mensual": 5.1,
+  "pnl_total": 6.13,
+  "pnl_neto": 6.13,
+  "total_fees": 0.0,
+  "pnl_diario": 0.2,
+  "pnl_mensual": 6.12,
+  "pnl_por_operacion": 0.61,
+  "avg_gain_pct": 0.53,
+  "avg_win_pct": 1.27,
+  "avg_loss_pct": -0.57,
+  "max_gain_pct": 2.71,
+  "max_loss_pct": -0.79,
+  "avg_duration_h": 10.4,
+  "max_duration_h": 12,
+  "total_days": 30.0,
+  "max_drawdown_pct": 1.45,
+  "score": 11.01
+}
