@@ -1,0 +1,2 @@
+# Modelos entrenados de XGBoost
+# Los archivos .json y .meta.json se generan con train_model.py

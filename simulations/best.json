@@ -1,232 +1,242 @@
 [
   {
     "config": {
-      "min_histogram_abs": 60,
+      "min_histogram_abs": 76,
       "confirm_velas": 1,
-      "sl_percent": 4.37,
-      "trailing_min_gain": 0.63,
+      "sl_percent": 3.66,
+      "trailing_min_gain": 2.59,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 762,
+      "wins": 442,
+      "losses": 320,
+      "win_rate": 58.0,
+      "total_pnl": -289.7,
+      "total_fees": 0.0,
+      "final_balance": 4710.3,
+      "roi": -5.79,
+      "avg_pnl_per_trade": -0.38,
+      "score": -5.79
+    },
+    "score": -5.79,
+    "timestamp": "2026-07-07T22:20:02.417613",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 72,
+      "confirm_velas": 2,
+      "sl_percent": 2.22,
+      "trailing_min_gain": 2.62,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 892,
+      "wins": 449,
+      "losses": 443,
+      "win_rate": 50.3,
+      "total_pnl": -760.93,
+      "total_fees": 0.0,
+      "final_balance": 4239.07,
+      "roi": -15.22,
+      "avg_pnl_per_trade": -0.85,
+      "score": -15.22
+    },
+    "score": -15.22,
+    "timestamp": "2026-07-07T22:20:02.018925",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 88,
+      "confirm_velas": 3,
+      "sl_percent": 2.37,
+      "trailing_min_gain": 2.22,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 755,
+      "wins": 399,
+      "losses": 356,
+      "win_rate": 52.8,
+      "total_pnl": -1086.16,
+      "total_fees": 0.0,
+      "final_balance": 3913.84,
+      "roi": -21.72,
+      "avg_pnl_per_trade": -1.44,
+      "score": -21.72
+    },
+    "score": -21.72,
+    "timestamp": "2026-07-07T22:18:32.525494",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 59,
+      "confirm_velas": 4,
+      "sl_percent": 0.52,
+      "trailing_min_gain": 4.52,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 1164,
+      "wins": 337,
+      "losses": 827,
+      "win_rate": 29.0,
+      "total_pnl": -1854.44,
+      "total_fees": 0.0,
+      "final_balance": 3145.56,
+      "roi": -37.09,
+      "avg_pnl_per_trade": -1.59,
+      "score": -37.09
+    },
+    "score": -37.09,
+    "timestamp": "2026-07-07T22:20:03.882886",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 106,
+      "confirm_velas": 3,
+      "sl_percent": 3.13,
+      "trailing_min_gain": 1.03,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 622,
+      "wins": 383,
+      "losses": 239,
+      "win_rate": 61.6,
+      "total_pnl": -1932.79,
+      "total_fees": 0.0,
+      "final_balance": 3067.21,
+      "roi": -38.66,
+      "avg_pnl_per_trade": -3.11,
+      "score": -38.66
+    },
+    "score": -38.66,
+    "timestamp": "2026-07-07T22:19:59.156479",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 105,
+      "confirm_velas": 4,
+      "sl_percent": 2.43,
+      "trailing_min_gain": 3.16,
       "fee_percent": 0.01
     },
     "summary": {
-      "trades": 15,
-      "wins": 11,
-      "losses": 4,
-      "win_rate": 73.3,
-      "total_pnl": 350.13,
-      "total_fees": 14.62,
-      "final_balance": 5342.84,
-      "roi": 6.86,
-      "avg_pnl_per_trade": 23.34,
-      "score": 5.4
+      "trades": 604,
+      "wins": 312,
+      "losses": 292,
+      "win_rate": 51.7,
+      "total_pnl": 184.86,
+      "total_fees": 409.6,
+      "final_balance": 4980.08,
+      "roi": -0.4,
+      "avg_pnl_per_trade": 0.31,
+      "score": -41.36
     },
-    "score": 5.4,
-    "timestamp": "2026-07-06T16:31:28.528927"
+    "score": -41.36,
+    "timestamp": "2026-07-07T22:19:30.967114",
+    "strategy": "macd_divergence"
   },
   {
     "config": {
-      "min_histogram_abs": 63,
+      "min_histogram_abs": 119,
+      "confirm_velas": 4,
+      "sl_percent": 2.79,
+      "trailing_min_gain": 3.92,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 508,
+      "wins": 250,
+      "losses": 258,
+      "win_rate": 49.2,
+      "total_pnl": -2306.88,
+      "total_fees": 0.0,
+      "final_balance": 2693.12,
+      "roi": -46.14,
+      "avg_pnl_per_trade": -4.54,
+      "score": -46.14
+    },
+    "score": -46.14,
+    "timestamp": "2026-07-07T22:19:26.424228",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 68,
+      "confirm_velas": 2,
+      "sl_percent": 1.2,
+      "trailing_min_gain": 1.45,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 1064,
+      "wins": 505,
+      "losses": 559,
+      "win_rate": 47.5,
+      "total_pnl": -2777.82,
+      "total_fees": 0.0,
+      "final_balance": 2222.18,
+      "roi": -55.56,
+      "avg_pnl_per_trade": -2.61,
+      "score": -55.56
+    },
+    "score": -55.56,
+    "timestamp": "2026-07-07T22:18:40.862073",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 120,
+      "confirm_velas": 3,
+      "sl_percent": 0.87,
+      "trailing_min_gain": 3.14,
+      "fee_percent": 0.0
+    },
+    "summary": {
+      "trades": 612,
+      "wins": 201,
+      "losses": 411,
+      "win_rate": 32.8,
+      "total_pnl": -2843.19,
+      "total_fees": 0.0,
+      "final_balance": 2156.81,
+      "roi": -56.86,
+      "avg_pnl_per_trade": -4.65,
+      "score": -56.86
+    },
+    "score": -56.86,
+    "timestamp": "2026-07-07T22:19:54.393035",
+    "strategy": "macd_divergence"
+  },
+  {
+    "config": {
+      "min_histogram_abs": 104,
       "confirm_velas": 1,
-      "sl_percent": 3.05,
-      "trailing_min_gain": 1.19,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 14,
-      "wins": 10,
-      "losses": 4,
-      "win_rate": 71.4,
-      "total_pnl": 258.23,
-      "total_fees": 0.0,
-      "final_balance": 5258.23,
-      "roi": 5.16,
-      "avg_pnl_per_trade": 18.44,
-      "score": 5.16
-    },
-    "score": 5.16,
-    "timestamp": "2026-07-06T16:31:29.345037"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 56,
-      "confirm_velas": 3,
-      "sl_percent": 3.63,
-      "trailing_min_gain": 1.18,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:01.510822"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 74,
-      "confirm_velas": 3,
       "sl_percent": 2.77,
-      "trailing_min_gain": 3.81,
+      "trailing_min_gain": 1.78,
       "fee_percent": 0.0
     },
     "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
+      "trades": 638,
+      "wins": 362,
+      "losses": 276,
+      "win_rate": 56.7,
+      "total_pnl": -3064.76,
       "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
+      "final_balance": 1935.24,
+      "roi": -61.3,
+      "avg_pnl_per_trade": -4.8,
+      "score": -61.3
     },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:02.304397"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 83,
-      "confirm_velas": 3,
-      "sl_percent": 3.92,
-      "trailing_min_gain": 3.83,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:02.413885"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 37,
-      "confirm_velas": 3,
-      "sl_percent": 4.64,
-      "trailing_min_gain": 4.11,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:22.376603"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 114,
-      "confirm_velas": 3,
-      "sl_percent": 4.97,
-      "trailing_min_gain": 3.25,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:22.735554"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 78,
-      "confirm_velas": 3,
-      "sl_percent": 2.75,
-      "trailing_min_gain": 0.9,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:23.047495"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 17,
-      "confirm_velas": 3,
-      "sl_percent": 2.9,
-      "trailing_min_gain": 0.85,
-      "fee_percent": 0.0
-    },
-    "summary": {
-      "trades": 36,
-      "wins": 18,
-      "losses": 18,
-      "win_rate": 50.0,
-      "total_pnl": 181.38,
-      "total_fees": 0.0,
-      "final_balance": 5181.38,
-      "roi": 3.63,
-      "avg_pnl_per_trade": 5.04,
-      "score": 3.63
-    },
-    "score": 3.63,
-    "timestamp": "2026-07-06T16:28:23.589634"
-  },
-  {
-    "config": {
-      "min_histogram_abs": 85,
-      "confirm_velas": 1,
-      "sl_percent": 2.98,
-      "trailing_min_gain": 0.65,
-      "fee_percent": 0.01
-    },
-    "summary": {
-      "trades": 12,
-      "wins": 9,
-      "losses": 3,
-      "win_rate": 75.0,
-      "total_pnl": 237.1,
-      "total_fees": 11.68,
-      "final_balance": 5231.27,
-      "roi": 4.63,
-      "avg_pnl_per_trade": 19.76,
-      "score": 3.46
-    },
-    "score": 3.46,
-    "timestamp": "2026-07-06T16:31:25.482443"
+    "score": -61.3,
+    "timestamp": "2026-07-07T22:20:08.672624",
+    "strategy": "macd_divergence"
   }
 ]

@@ -63,7 +63,7 @@ SEARCH_SPACE = {
 }
 
 BEST_FILE = Path(__file__).parent.parent / "simulations/best.json"
-DATA_FILE = Path(__file__).parent.parent / "historical_1h.csv"
+DATA_FILE = Path(__file__).parent.parent / "BTCUSD_1h_Binance.csv"
 SIMULATIONS_DIR = Path(__file__).parent.parent / "simulations"
 
 
@@ -85,16 +85,40 @@ def ema(data: np.ndarray, period: int) -> np.ndarray:
     return result
 
 
+def _parse_timestamp(ts_str: str) -> int:
+    """Parse timestamp from string (datetime or unix ms)."""
+    ts_str = ts_str.strip()
+    # Try unix milliseconds (digits only)
+    if ts_str.isdigit() or (ts_str.startswith('-') and ts_str[1:].isdigit()):
+        return int(ts_str)
+    # Try datetime string: '2026-06-07 20:00:00' or '2026-06-07T20:00:00'
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            return int(datetime.strptime(ts_str, fmt).replace(tzinfo=timezone.utc).timestamp() * 1000)
+        except ValueError:
+            continue
+    # Last resort: try float
+    return int(float(ts_str))
+
+
 def load_ohlcv(csv_path: str | Path) -> list[list[float]]:
     rows = []
     with open(csv_path) as f:
         reader = csv.DictReader(f)
         for r in reader:
+            # Binance CSV: Open time, Close time, Open, High, Low, Close, Volume
+            # Kraken CSV: timestamp, open, high, low, close, volume
+            ts_col = "Open time" if "Open time" in r else "timestamp"
+            o_col = "Open" if "Open" in r else "open"
+            h_col = "High" if "High" in r else "high"
+            l_col = "Low" if "Low" in r else "low"
+            c_col = "Close" if "Close" in r else "close"
+            v_col = "Volume" if "Volume" in r else "volume"
             rows.append([
-                int(r["timestamp"]),
-                float(r["open"]), float(r["high"]),
-                float(r["low"]), float(r["close"]),
-                float(r["volume"]),
+                _parse_timestamp(r[ts_col]),
+                float(r[o_col]), float(r[h_col]),
+                float(r[l_col]), float(r[c_col]),
+                float(r[v_col]),
             ])
     return rows
 
@@ -287,6 +311,182 @@ def simulate(ohlcv: list[list[float]], hist: np.ndarray, config: dict) -> dict:
     }
 
 
+# ── Simulador MACD Histogram -50 (doble entrada) ──
+
+# Config fija para la estrategia de histograma -50
+MACD_HIST_50_CONFIG = {
+    "invest_percent": 45.0,       # % del capital en cada entrada
+    "drop_2nd_entry_pct": 2.0,    # % de caída para segunda entrada
+    "tp_percent": 1.0,            # take profit %
+    "sl_percent": 1.0,            # stop loss % (solo tras 2ª compra)
+    "max_position_candles": 12,   # máximo velas en posición
+    "fee_percent": 0.0,           # comisión %
+}
+
+
+def simulate_macd_hist_50(ohlcv: list[list[float]], hist: np.ndarray, config: dict) -> dict:
+    """Simula la estrategia MACD Histogram -50 con doble entrada.
+
+    Señal:
+      1. Histograma cruza por debajo de -50 (barra anterior > -50, barra actual < -50)
+      2. La barra siguiente CIERRA más alta (menos negativa) que la barra que cruzó → BUY
+
+    Ejecución:
+      - Compra 45% del EUR disponible
+      - Si en las 4 velas siguientes cae 2% → segunda compra de 45%
+      - TP: +1% del precio de entrada (o precio ponderado de las dos)
+      - SL: -1% del precio ponderado (solo activo tras segunda compra)
+    """
+    cfg = {**MACD_HIST_50_CONFIG, **config}
+    fee_rate = cfg["fee_percent"] / 100.0
+    invest_pct = cfg["invest_percent"] / 100.0
+    drop_2nd = cfg["drop_2nd_entry_pct"] / 100.0
+    tp_rate = cfg["tp_percent"] / 100.0
+    sl_rate = cfg["sl_percent"] / 100.0
+    max_candles = cfg["max_position_candles"]
+
+    eur = FIXED["initial_eur"]
+    btc1 = 0.0
+    btc2 = 0.0
+    entry_p1 = 0.0
+    entry_p2 = 0.0
+    entry_i = 0
+    in_pos = False
+    has_second = False
+
+    trades = 0
+    wins = 0
+    losses = 0
+    total_pnl = 0.0
+    total_fees = 0.0
+
+    # State for signal detection
+    awaiting_cross = False
+    cross_bar_value = 0.0
+
+    for i in range(len(ohlcv)):
+        h_cur = float(hist[i]) if not np.isnan(hist[i]) else None
+        h_prev = float(hist[i-1]) if i > 0 and not np.isnan(hist[i-1]) else None
+        h_prev2 = float(hist[i-2]) if i > 1 and not np.isnan(hist[i-2]) else None
+        close = float(ohlcv[i][4])
+
+        # ── Position management ──
+        if in_pos:
+            avg_price = ((entry_p1 * btc1 + entry_p2 * btc2) / (btc1 + btc2)
+                         if (btc1 + btc2) > 0 and has_second else entry_p1)
+
+            # Take profit
+            if close >= avg_price * (1 + tp_rate):
+                pnl = (close - avg_price) * (btc1 + btc2)
+                fee = (btc1 + btc2) * close * fee_rate
+                total_fees += fee
+                total_pnl += pnl - fee
+                eur += (btc1 + btc2) * close - fee
+                btc1 = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                trades += 1
+                if pnl - fee > 0: wins += 1
+                else: losses += 1
+                continue
+
+            # Stop loss (solo tras segunda compra)
+            if has_second and close <= avg_price * (1 - sl_rate):
+                pnl = (close - avg_price) * (btc1 + btc2)
+                fee = (btc1 + btc2) * close * fee_rate
+                total_fees += fee
+                total_pnl += pnl - fee
+                eur += (btc1 + btc2) * close - fee
+                btc1 = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                trades += 1
+                if pnl - fee > 0: wins += 1
+                else: losses += 1
+                continue
+
+            # Max time
+            if i - entry_i >= max_candles:
+                pnl = (close - avg_price) * (btc1 + btc2)
+                fee = (btc1 + btc2) * close * fee_rate
+                total_fees += fee
+                total_pnl += pnl - fee
+                eur += (btc1 + btc2) * close - fee
+                btc1 = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                trades += 1
+                if pnl - fee > 0: wins += 1
+                else: losses += 1
+                continue
+
+            # Second entry within 4 candles
+            if not has_second and (i - entry_i) <= 4:
+                if close <= entry_p1 * (1 - drop_2nd):
+                    invest2 = eur * invest_pct
+                    if invest2 >= FIXED["min_balance_eur"]:
+                        buy_fee = invest2 * fee_rate
+                        total_fees += buy_fee
+                        btc2 = invest2 / close
+                        eur -= invest2 + buy_fee
+                        entry_p2 = close
+                        has_second = True
+
+        # ── Signal detection (MACD Hist -50 valley → reversal) ──
+        if h_prev2 is not None and h_prev is not None:
+            # Step 1: Detect cross below -50
+            if not in_pos and not awaiting_cross:
+                if h_prev2 > -50 and h_prev < -50 and h_prev < h_prev2:
+                    awaiting_cross = True
+                    cross_bar_value = h_prev
+
+            # Step 2: Confirm reversal (next bar closed higher)
+            if awaiting_cross and h_cur is not None:
+                if h_cur > cross_bar_value:
+                    # Reversal confirmed → BUY
+                    awaiting_cross = False
+                    invest = eur * invest_pct
+                    if invest >= FIXED["min_balance_eur"]:
+                        buy_fee = invest * fee_rate
+                        total_fees += buy_fee
+                        btc1 = invest / close
+                        eur -= invest + buy_fee
+                        entry_p1 = close
+                        entry_i = i
+                        in_pos = True
+                        has_second = False
+                        btc2 = 0.0
+
+    # Close any remaining position
+    if in_pos and len(ohlcv) > 0:
+        last_c = float(ohlcv[-1][4])
+        if has_second:
+            avg_price = ((entry_p1 * btc1 + entry_p2 * btc2) / (btc1 + btc2)
+                         if (btc1 + btc2) > 0 else entry_p1)
+        else:
+            avg_price = entry_p1
+        pnl = (last_c - avg_price) * (btc1 + btc2)
+        fee = (btc1 + btc2) * last_c * fee_rate
+        total_fees += fee
+        total_pnl += pnl - fee
+        eur += (btc1 + btc2) * last_c - fee
+        trades += 1
+        if pnl - fee > 0: wins += 1
+        else: losses += 1
+
+    final_balance = eur
+    roi = ((final_balance - FIXED["initial_eur"]) / FIXED["initial_eur"]) * 100
+    win_rate = (wins / trades * 100) if trades > 0 else 0
+    avg_win = total_pnl / trades if trades > 0 else 0
+
+    return {
+        "trades": trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(win_rate, 1),
+        "total_pnl": round(total_pnl, 2),
+        "total_fees": round(total_fees, 2),
+        "final_balance": round(final_balance, 2),
+        "roi": round(roi, 2),
+        "avg_pnl_per_trade": round(avg_win, 2),
+        "score": round(roi - abs(total_fees) * 0.1, 2),
+    }
+
+
 def random_config() -> dict:
     """Generate a random configuration within search space."""
     cfg = {}
@@ -299,6 +499,12 @@ def random_config() -> dict:
 
 
 def config_to_str(cfg: dict) -> str:
+    if "invest_percent" in cfg:
+        # MACD Hist -50 config
+        return (f"MACD Hist -50  inv={cfg['invest_percent']}%  "
+                f"drop2nd={cfg['drop_2nd_entry_pct']}%  "
+                f"TP={cfg['tp_percent']}%  SL={cfg['sl_percent']}%  "
+                f"fee={cfg['fee_percent']}%")
     return (f"|hist|≥{cfg['min_histogram_abs']}  "
             f"conf={cfg['confirm_velas']}  "
             f"SL={cfg['sl_percent']}%  "
@@ -355,7 +561,8 @@ def main():
         for idx, entry in enumerate(best, 1):
             cfg = entry["config"]
             s = entry["summary"]
-            print(f"  #{idx} — Score: {entry['score']}")
+            strategy_name = entry.get("strategy", "macd_divergence")
+            print(f"  #{idx} — [{strategy_name}] Score: {entry['score']}")
             print(f"     {config_to_str(cfg)}")
             print(f"     Trades: {s['trades']}  WR: {s['win_rate']}%  "
                   f"PnL: {s['total_pnl']:+.2f}€  ROI: {s['roi']:+.2f}%  "
@@ -392,8 +599,8 @@ def main():
     best = load_best()
     print(f"\n🏆 Mejores registradas actualmente: {len(best)}")
 
-    # ── Run optimization ──
-    print(f"\n🚀 Ejecutando {args.iter} iteraciones ...")
+    # ── Run optimization (classic MACD divergence) ──
+    print(f"\n🚀 Ejecutando {args.iter} iteraciones (MACD Divergence clásico) ...")
     print(f"{'─'*60}")
     print(f"{'#':<6} {'Config':<45} {'Trades':<7} {'WR':<6} {'PnL':<10} {'ROI':<8} {'Score':<8}")
     print(f"{'─'*60}")
@@ -411,6 +618,7 @@ def main():
             "summary": result,
             "score": score,
             "timestamp": datetime.now().isoformat(),
+            "strategy": "macd_divergence",
         }
         new_results.append(entry)
 
@@ -430,6 +638,35 @@ def main():
             save_best(best)
             new_results = []
 
+    # ── Run MACD Hist -50 strategy ──
+    print(f"\n🚀 Ejecutando MACD Histogram -50 (doble entrada) ...")
+    print(f"{'─'*60}")
+
+    # Try a few fee variations for the MACD Hist -50 strategy
+    hist50_results = []
+    for fee_pct in [0.0, 0.1, 0.15, 0.2, 0.25]:
+        cfg = dict(MACD_HIST_50_CONFIG)
+        cfg["fee_percent"] = fee_pct
+        result = simulate_macd_hist_50(ohlcv, hist, cfg)
+        score = result["score"]
+
+        entry = {
+            "config": cfg,
+            "summary": result,
+            "score": score,
+            "timestamp": datetime.now().isoformat(),
+            "strategy": "macd_hist_50",
+        }
+        hist50_results.append(entry)
+
+        cfg_str = f"MACD Hist -50  invest={cfg['invest_percent']}%  drop2nd={cfg['drop_2nd_entry_pct']}%  TP={cfg['tp_percent']}%  SL={cfg['sl_percent']}%  fee={fee_pct}%"
+        print(f"  {cfg_str:<55} "
+              f"{result['trades']:<7} {result['win_rate']:<6} "
+              f"{result['total_pnl']:<+10} {result['roi']:<+8} {score:<+8}")
+
+    # Merge MACD Hist -50 results into best
+    best = merge_best(best, hist50_results, top_n=10)
+
     # ── Final summary ──
     best = merge_best(best, new_results, top_n=10)
     save_best(best)
@@ -440,7 +677,8 @@ def main():
     for idx, entry in enumerate(best, 1):
         cfg = entry["config"]
         s = entry["summary"]
-        print(f"  #{idx} — Score: {entry['score']}")
+        strategy_name = entry.get("strategy", "macd_divergence")
+        print(f"  #{idx} — [{strategy_name}] Score: {entry['score']}")
         print(f"     {config_to_str(cfg)}")
         print(f"     Trades: {s['trades']}  WR: {s['win_rate']}%  "
               f"PnL: {s['total_pnl']:+.2f}€  ROI: {s['roi']:+.2f}%  "

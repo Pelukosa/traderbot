@@ -1,0 +1,58 @@
+{
+  "trained_at": "2026-07-07T22:07:53.842193",
+  "n_samples": 71273,
+  "features": [
+    "rsi_14",
+    "stoch_k",
+    "stoch_d",
+    "roc_6",
+    "roc_12",
+    "macd_line_rel",
+    "macd_signal_rel",
+    "macd_hist_rel",
+    "price_vs_sma20",
+    "price_vs_sma50",
+    "sma20_vs_sma50",
+    "bb_position",
+    "bb_width",
+    "bb_squeeze",
+    "volatility_14",
+    "atr_ratio",
+    "vol_rel",
+    "vol_short",
+    "vol_trend",
+    "returns_1",
+    "returns_6",
+    "returns_12",
+    "high_low_ratio",
+    "candle_body_ratio",
+    "dist_high_20",
+    "dist_low_20",
+    "consecutive_dir",
+    "ema_cross_signal"
+  ],
+  "feature_count": 28,
+  "params": {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3,
+    "gamma": 0.1,
+    "reg_alpha": 0.5,
+    "reg_lambda": 1.0,
+    "scale_pos_weight": 5.191729649900096,
+    "random_state": 42
+  },
+  "wf_metrics": {
+    "accuracy": 0.7547200769954057,
+    "precision": 0.2663515126989382,
+    "recall": 0.43674481995697334,
+    "f1": 0.3289536090570208
+  },
+  "class_balance": {
+    "0": 59762,
+    "1": 11511
+  }
+}

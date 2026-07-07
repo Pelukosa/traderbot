@@ -26,7 +26,7 @@ MAX_POSITION_CANDLES = 12  # maximo velas en posicion (12h)
 MIN_TRADE = 5.0            # minimo para operar
 FEE_RATE = 0.0             # comision simulada (% por operacion, 0.20 = OKX)
 
-DATA_FILE = Path(__file__).parent.parent / "historical_1h.csv"
+DATA_FILE = Path(__file__).parent.parent / "BTCUSD_1h_Binance.csv"
 SIM_DIR = Path(__file__).parent.parent / "simulations"
 
 
@@ -126,6 +126,20 @@ def _atr(ohlcv: list[list[float]], period: int = 14) -> np.ndarray:
 
 # ── Carga de datos ──
 
+def _parse_ts(ts_str: str) -> int:
+    """Parse timestamp from string (datetime or unix ms)."""
+    ts_str = ts_str.strip()
+    if ts_str.isdigit() or (ts_str.startswith('-') and ts_str[1:].isdigit()):
+        return int(ts_str)
+    from datetime import datetime, timezone
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            return int(datetime.strptime(ts_str, fmt).replace(tzinfo=timezone.utc).timestamp() * 1000)
+        except ValueError:
+            continue
+    return int(float(ts_str))
+
+
 def cargar_velas(path: str | Path | None = None) -> list[list[float]]:
     p = Path(path) if path else DATA_FILE
     if not p.exists():
@@ -135,8 +149,16 @@ def cargar_velas(path: str | Path | None = None) -> list[list[float]]:
     rows = []
     with open(p) as f:
         for r in csv.DictReader(f):
-            rows.append([int(r["timestamp"]), float(r["open"]), float(r["high"]),
-                         float(r["low"]), float(r["close"]), float(r["volume"])])
+            # Binance CSV: Open time, Close time, Open, High, Low, Close, Volume
+            # Kraken CSV: timestamp, open, high, low, close, volume
+            ts_col = "Open time" if "Open time" in r else "timestamp"
+            o_col = "Open" if "Open" in r else "open"
+            h_col = "High" if "High" in r else "high"
+            l_col = "Low" if "Low" in r else "low"
+            c_col = "Close" if "Close" in r else "close"
+            v_col = "Volume" if "Volume" in r else "volume"
+            rows.append([_parse_ts(r[ts_col]), float(r[o_col]), float(r[h_col]),
+                         float(r[l_col]), float(r[c_col]), float(r[v_col])])
     return rows
 
 
@@ -309,6 +331,239 @@ def _hist_buf(hist_arr: np.ndarray, i: int) -> list[float]:
     return h
 
 
+# ── Nueva estrategia: MACD Histogram < -50 valley con doble entrada ──
+
+def senal_macd_hist_50(ind: dict, i: int, cfg: dict) -> str | None:
+    """MACD histogram crosses below -50 and then reverses → buy signal.
+
+    Two-step confirmation:
+    1. Histogram bar crosses from > -50 to < -50 (going down)
+    2. Next completed bar is HIGHER (less negative) than the crossing bar
+
+    Example: -2 → -6 → -17 → -40 → -52 (cross!) → -30 (next bar, -30 > -52) → BUY
+    """
+    hist_arr = ind["hist_arr"]
+    if i < 2:
+        return None
+    h_prev = float(hist_arr[i-1]) if not np.isnan(hist_arr[i-1]) else None
+    h_prev2 = float(hist_arr[i-2]) if not np.isnan(hist_arr[i-2]) else None
+    if h_prev is None or h_prev2 is None:
+        return None
+    # Crossing: previous bar was > -50, current closed bar (i-1) is < -50, AND going down
+    if h_prev2 > -50 and h_prev < -50 and h_prev < h_prev2:
+        # Current bar (i) just started — check reversal at next bar
+        pass  # We'll mark awaiting and check next iteration
+
+    return None
+
+
+def senal_macd_hist_50_stateful(state: dict, ind: dict, i: int, cfg: dict) -> str | None:
+    """Stateful version that tracks the crossing and waits for reversal.
+
+    Uses 'state' dict with keys: 'awaiting_cross_bar', 'cross_bar_value'
+    """
+    hist_arr = ind["hist_arr"]
+    if i < 2:
+        return None
+
+    h_prev = float(hist_arr[i-1]) if not np.isnan(hist_arr[i-1]) else None
+    h_prev2 = float(hist_arr[i-2]) if not np.isnan(hist_arr[i-2]) else None
+    h_cur = float(hist_arr[i]) if not np.isnan(hist_arr[i]) else None
+
+    if h_prev is None or h_prev2 is None:
+        return None
+
+    # Step 1: Detect crossing below -50 (going down)
+    if h_prev2 > -50 and h_prev < -50 and h_prev < h_prev2:
+        state["awaiting_cross_bar"] = True
+        state["cross_bar_value"] = h_prev
+        return None
+
+    # Step 2: If awaiting, check if next bar closed higher (reversal confirmed)
+    if state.get("awaiting_cross_bar") and h_cur is not None:
+        cross_val = state.get("cross_bar_value", -999)
+        if h_cur > cross_val:
+            # Reversal confirmed!
+            state["awaiting_cross_bar"] = False
+            state["cross_bar_value"] = None
+            return "buy"
+
+    return None
+
+
+# ── Simulación especial para MACD Hist -50 (doble entrada) ──
+
+def simular_macd_hist_50(
+    ohlcv: list[list[float]],
+    pre: dict,
+    cfg: dict,
+    capital: float = INITIAL_EUR,
+    fee_rate: float = FEE_RATE,
+) -> ResultadoSim:
+    """Simula la estrategia MACD Histogram -50 con doble entrada.
+
+    - Compra 45% al confirmar valle < -50 con reversión
+    - Si en 4 velas cae 2% → segunda compra de 45%
+    - SL: -1% del precio ponderado (solo tras 2ª compra)
+    - TP: +1% (del precio de entrada único o ponderado)
+    """
+    invest_pct = cfg.get("invest_percent", 45.0) / 100.0
+    drop_2nd_pct = cfg.get("drop_2nd_entry_pct", 2.0) / 100.0
+    tp_pct = cfg.get("tp_percent", 1.0) / 100.0
+    sl_pct = cfg.get("sl_percent", 1.0) / 100.0
+    max_candles = cfg.get("max_position_candles", 12)
+    fee_por_op = fee_rate / 100.0
+
+    closes = pre["closes"]
+    hist_arr = pre["hist_arr"]
+
+    trades: list[tuple] = []
+    eur = capital
+    btc = 0.0
+    btc2 = 0.0  # second position
+    in_pos = False
+    has_second = False
+    entry_p1 = 0.0
+    entry_p2 = 0.0
+    entry_i = 0
+    total_fees = 0.0
+
+    state: dict = {"awaiting_cross_bar": False, "cross_bar_value": None}
+
+    for i in range(len(ohlcv)):
+        close = float(closes[i])
+
+        if in_pos:
+            # Check weighted average price
+            if has_second:
+                avg_price = (entry_p1 * btc + entry_p2 * btc2) / (btc + btc2) if (btc + btc2) > 0 else entry_p1
+            else:
+                avg_price = entry_p1
+
+            # Take profit
+            if close >= avg_price * (1 + tp_pct):
+                pnl = (close - avg_price) * (btc + btc2)
+                fee = (btc + btc2) * close * fee_por_op
+                total_fees += fee
+                trades.append((avg_price, close, tp_pct * 100, i - entry_i, "TP"))
+                eur += (btc + btc2) * close - fee
+                btc = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                continue
+
+            # Stop loss (only active after second buy)
+            if has_second and close <= avg_price * (1 - sl_pct):
+                pnl = (close - avg_price) * (btc + btc2)
+                fee = (btc + btc2) * close * fee_por_op
+                total_fees += fee
+                trades.append((avg_price, close, -sl_pct * 100, i - entry_i, "SL"))
+                eur += (btc + btc2) * close - fee
+                btc = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                continue
+
+            # Max time
+            if i - entry_i >= max_candles:
+                pnl = (close - avg_price) * (btc + btc2)
+                fee = (btc + btc2) * close * fee_por_op
+                total_fees += fee
+                pnl_pct = (close - avg_price) / avg_price * 100
+                trades.append((avg_price, close, pnl_pct, i - entry_i, "MAX_TIME"))
+                eur += (btc + btc2) * close - fee
+                btc = 0.0; btc2 = 0.0; in_pos = False; has_second = False
+                continue
+
+            # Second entry check: within 4 candles, price dropped 2% below first entry
+            if not has_second and i - entry_i <= 4:
+                if close <= entry_p1 * (1 - drop_2nd_pct):
+                    invest2 = eur * invest_pct
+                    if invest2 >= MIN_TRADE:
+                        buy_fee = invest2 * fee_por_op
+                        total_fees += buy_fee
+                        btc2 = invest2 / close
+                        eur -= invest2 + buy_fee
+                        entry_p2 = close
+                        has_second = True
+
+        # Signal detection
+        if not in_pos:
+            accion = senal_macd_hist_50_stateful(state, pre, i, cfg)
+            if accion == "buy":
+                invest = eur * invest_pct
+                if invest >= MIN_TRADE:
+                    buy_fee = invest * fee_por_op
+                    total_fees += buy_fee
+                    btc = invest / close
+                    eur -= invest + buy_fee
+                    entry_p1 = close
+                    entry_i = i
+                    in_pos = True
+                    has_second = False
+                    btc2 = 0.0
+
+    # Close any remaining position
+    if in_pos:
+        last_c = float(closes[-1])
+        if has_second:
+            avg_price = (entry_p1 * btc + entry_p2 * btc2) / (btc + btc2) if (btc + btc2) > 0 else entry_p1
+        else:
+            avg_price = entry_p1
+        pnl_pct = (last_c - avg_price) / avg_price * 100
+        fee = (btc + btc2) * last_c * fee_por_op
+        total_fees += fee
+        trades.append((avg_price, last_c, pnl_pct, len(ohlcv) - entry_i, "END"))
+        eur += (btc + btc2) * last_c - fee
+
+    # Build result
+    r = ResultadoSim(
+        estrategia="MACD Hist -50 (doble entrada)",
+        descripcion=" | ".join(f"{k}={v}" for k, v in sorted(cfg.items())),
+    )
+
+    num = len(trades)
+    total_dias = len(ohlcv) / 24.0
+    pnl_neto = eur - capital
+
+    if num == 0:
+        r.dias_simulados = total_dias
+        r.comisiones = total_fees
+        return r
+
+    gains_pct = [t[2] for t in trades]
+    wins = [g for g in gains_pct if g > 0]
+    losses = [g for g in gains_pct if g <= 0]
+    durs = [t[3] for t in trades]
+    pnl_bruto = pnl_neto + total_fees
+
+    r.total_ops = num; r.ganadoras = len(wins); r.perdedoras = len(losses)
+    r.winrate = len(wins) / num * 100
+    r.ganancia_media_por_op = float(np.mean(gains_pct))
+    r.ganancia_media_ganadoras = float(np.mean(wins)) if wins else 0.0
+    r.perdida_media_perdedoras = float(np.mean(losses)) if losses else 0.0
+    r.mejor_operacion = float(max(gains_pct))
+    r.peor_operacion = float(min(gains_pct))
+    r.pnl_bruto = pnl_bruto; r.pnl_neto = pnl_neto; r.comisiones = total_fees
+    r.pnl_por_operacion = pnl_neto / num
+    r.pnl_diario = pnl_neto / total_dias
+    r.pnl_mensual = r.pnl_diario * 30
+    r.roi_total = pnl_neto / capital * 100
+    r.roi_diario = r.roi_total / total_dias
+    r.roi_mensual = r.roi_diario * 30
+    r.tiempo_medio_h = float(np.mean(durs))
+    r.tiempo_maximo_h = float(max(durs))
+    r.dias_simulados = total_dias
+    r.ops_por_mes = num / total_dias * 30
+
+    max_dd = 0.0; peak = capital; bal = capital
+    for g in gains_pct:
+        bal += bal * (g / 100) * invest_pct
+        if bal > peak: peak = bal
+        dd = (peak - bal) / peak * 100
+        if dd > max_dd: max_dd = dd
+    r.max_drawdown = max_dd
+    r.score = r.roi_mensual * 0.4 + r.winrate * 0.15 + r.pnl_por_operacion * 0.3 - r.max_drawdown * 0.15
+
+    return r
+
+
 # ── Registry de estrategias ──
 
 ESTRATEGIAS: list[dict] = [
@@ -360,6 +615,13 @@ ESTRATEGIAS: list[dict] = [
         "senal": senal_triple,
         "config": {"min_histogram_abs": 50, "rsi_max": 30, "bb_max_distance_pct": 2.0, "sl_percent": 4.95, "trailing_min_gain": 1.05, "fee_percent": 0.0},
     },
+    {
+        "id": "macd_hist_50",
+        "nombre": "MACD Hist -50 (doble entrada)",
+        "senal": None,  # usa simulación dedicada
+        "config": {"invest_percent": 45.0, "drop_2nd_entry_pct": 2.0, "tp_percent": 1.0, "sl_percent": 1.0, "max_position_candles": 12, "fee_percent": 0.0},
+        "custom_sim": True,
+    },
 ]
 
 
@@ -381,7 +643,7 @@ def simular_estrategia(
     senal_fn = est["senal"]
     sl_rate = cfg.get("sl_percent", 4.95) / 100.0
     trail_min = cfg.get("trailing_min_gain", 1.0)
-    fee_por_op = fee_rate / 100.0 if fee_rate >= 1 else fee_rate  # normalizar
+    fee_por_op = fee_rate / 100.0  # fee_rate en % (ej: 0.15 = 0.15%)
 
     closes = pre["closes"]
 
@@ -525,7 +787,7 @@ def simular_estrategia_con_indices(
     senal_fn = est["senal"]
     sl_rate = cfg.get("sl_percent", 4.95) / 100.0
     trail_min = cfg.get("trailing_min_gain", 1.0)
-    fee_por_op = fee_rate / 100.0 if fee_rate >= 1 else fee_rate
+    fee_por_op = fee_rate / 100.0
 
     closes = pre["closes"]
 
@@ -714,7 +976,10 @@ def ejecutar(capital: float = INITIAL_EUR, fee_rate: float = FEE_RATE) -> list[R
 
     resultados = []
     for est in ESTRATEGIAS:
-        r = simular_estrategia(ohlcv, pre, est, capital=capital, fee_rate=fee_rate)
+        if est.get("custom_sim"):
+            r = simular_macd_hist_50(ohlcv, pre, est["config"], capital=capital, fee_rate=fee_rate)
+        else:
+            r = simular_estrategia(ohlcv, pre, est, capital=capital, fee_rate=fee_rate)
         resultados.append(r)
         print(f"    ✓ {est['nombre']} ({r.total_ops} ops, WR {r.winrate:.1f}%, "
               f"ROI {r.roi_mensual:+.2f}%)")

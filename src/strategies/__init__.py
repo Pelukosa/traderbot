@@ -5,6 +5,7 @@ from src.strategies.rsi import RSI
 from src.strategies.macd import MACD
 from src.strategies.macd_divergence import MACDDivergence
 from src.strategies.macd_rsi_filtro import MACDRSIFiltro
+from src.strategies.macd_histogram_50 import MACDHistogram50
 
 STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "sma_crossover": SmaCrossover,
@@ -12,4 +13,5 @@ STRATEGY_REGISTRY: dict[str, type[BaseStrategy]] = {
     "macd": MACD,
     "macd_divergence": MACDDivergence,
     "macd_rsi_filtro": MACDRSIFiltro,
+    "macd_histogram_50": MACDHistogram50,
 }
