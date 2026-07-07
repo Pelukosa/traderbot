@@ -22,10 +22,8 @@ from src.config import settings
 from src.exchange import ExchangeManager
 from src.execution import ExecutionManager
 from src.logger import setup_logger
-from src.strategy import STRATEGY_REGISTRY
-from src.notifications import notify_buy, notify_sell, notify_sl, notify_error, notify_startup, notify_shutdown, notify_heartbeat
-
-from src.strategy import Signal
+from src.strategies import STRATEGY_REGISTRY, Signal
+from src.notifications import *
 
 TIMEFRAME = "1h"
 FAST_TICK = 5 * 60  # 5 min for sell/trailing/SL checks

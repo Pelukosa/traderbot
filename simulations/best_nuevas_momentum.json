@@ -1,0 +1,247 @@
+{
+  "strategy": "MOMENTUM (EMA20+Vol)",
+  "strategy_id": "momentum",
+  "iterations": 3000,
+  "results": [
+    {
+      "config": {
+        "lookback": 9,
+        "vol_mult": 1.91,
+        "sl_percent": 2.87,
+        "trailing_min_gain": 0.5,
+        "fee_percent": 0.03
+      },
+      "summary": {
+        "trades": 14,
+        "wins": 8,
+        "losses": 6,
+        "win_rate": 57.1,
+        "total_pnl": -0.94,
+        "total_fees": 0.96,
+        "final_balance": 118.58,
+        "roi": -1.18,
+        "avg_pnl": -0.07,
+        "max_dd": 4.35,
+        "max_pnl_trade": 1.39,
+        "score": 3.87
+      },
+      "score": 3.87
+    },
+    {
+      "config": {
+        "lookback": 7,
+        "vol_mult": 2.98,
+        "sl_percent": 2.22,
+        "trailing_min_gain": 0.65,
+        "fee_percent": 0.07
+      },
+      "summary": {
+        "trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 60.0,
+        "total_pnl": -2.51,
+        "total_fees": 0.79,
+        "final_balance": 117.1,
+        "roi": -2.42,
+        "avg_pnl": -0.5,
+        "max_dd": 2.51,
+        "max_pnl_trade": 0.33,
+        "score": 3.78
+      },
+      "score": 3.78
+    },
+    {
+      "config": {
+        "lookback": 6,
+        "vol_mult": 2.75,
+        "sl_percent": 2.25,
+        "trailing_min_gain": 0.68,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 6,
+        "wins": 3,
+        "losses": 3,
+        "win_rate": 50.0,
+        "total_pnl": -1.15,
+        "total_fees": 0.0,
+        "final_balance": 118.85,
+        "roi": -0.96,
+        "avg_pnl": -0.19,
+        "max_dd": 2.45,
+        "max_pnl_trade": 1.14,
+        "score": 3.69
+      },
+      "score": 3.69
+    },
+    {
+      "config": {
+        "lookback": 9,
+        "vol_mult": 2.62,
+        "sl_percent": 1.23,
+        "trailing_min_gain": 0.62,
+        "fee_percent": 0.02
+      },
+      "summary": {
+        "trades": 6,
+        "wins": 3,
+        "losses": 3,
+        "win_rate": 50.0,
+        "total_pnl": -1.28,
+        "total_fees": 0.27,
+        "final_balance": 118.58,
+        "roi": -1.18,
+        "avg_pnl": -0.21,
+        "max_dd": 2.49,
+        "max_pnl_trade": 1.12,
+        "score": 3.57
+      },
+      "score": 3.57
+    },
+    {
+      "config": {
+        "lookback": 6,
+        "vol_mult": 2.97,
+        "sl_percent": 2.4,
+        "trailing_min_gain": 0.65,
+        "fee_percent": 0.13
+      },
+      "summary": {
+        "trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 60.0,
+        "total_pnl": -2.84,
+        "total_fees": 1.46,
+        "final_balance": 116.43,
+        "roi": -2.97,
+        "avg_pnl": -0.57,
+        "max_dd": 2.56,
+        "max_pnl_trade": 0.26,
+        "score": 3.47
+      },
+      "score": 3.47
+    },
+    {
+      "config": {
+        "lookback": 4,
+        "vol_mult": 2.77,
+        "sl_percent": 1.92,
+        "trailing_min_gain": 0.58,
+        "fee_percent": 0.04
+      },
+      "summary": {
+        "trades": 6,
+        "wins": 3,
+        "losses": 3,
+        "win_rate": 50.0,
+        "total_pnl": -1.42,
+        "total_fees": 0.54,
+        "final_balance": 118.31,
+        "roi": -1.41,
+        "avg_pnl": -0.24,
+        "max_dd": 2.52,
+        "max_pnl_trade": 1.09,
+        "score": 3.44
+      },
+      "score": 3.44
+    },
+    {
+      "config": {
+        "lookback": 9,
+        "vol_mult": 1.97,
+        "sl_percent": 2.22,
+        "trailing_min_gain": 0.87,
+        "fee_percent": 0.01
+      },
+      "summary": {
+        "trades": 13,
+        "wins": 7,
+        "losses": 6,
+        "win_rate": 53.8,
+        "total_pnl": -1.83,
+        "total_fees": 0.29,
+        "final_balance": 118.02,
+        "roi": -1.65,
+        "avg_pnl": -0.14,
+        "max_dd": 3.82,
+        "max_pnl_trade": 1.38,
+        "score": 3.44
+      },
+      "score": 3.44
+    },
+    {
+      "config": {
+        "lookback": 5,
+        "vol_mult": 2.99,
+        "sl_percent": 1.85,
+        "trailing_min_gain": 0.53,
+        "fee_percent": 0.14
+      },
+      "summary": {
+        "trades": 5,
+        "wins": 3,
+        "losses": 2,
+        "win_rate": 60.0,
+        "total_pnl": -2.89,
+        "total_fees": 1.57,
+        "final_balance": 116.32,
+        "roi": -3.07,
+        "avg_pnl": -0.58,
+        "max_dd": 2.57,
+        "max_pnl_trade": 0.25,
+        "score": 3.42
+      },
+      "score": 3.42
+    },
+    {
+      "config": {
+        "lookback": 10,
+        "vol_mult": 2.34,
+        "sl_percent": 4.39,
+        "trailing_min_gain": 0.5,
+        "fee_percent": 0.0
+      },
+      "summary": {
+        "trades": 8,
+        "wins": 5,
+        "losses": 3,
+        "win_rate": 62.5,
+        "total_pnl": -3.29,
+        "total_fees": 0.0,
+        "final_balance": 116.71,
+        "roi": -2.74,
+        "avg_pnl": -0.41,
+        "max_dd": 4.75,
+        "max_pnl_trade": 1.12,
+        "score": 3.32
+      },
+      "score": 3.32
+    },
+    {
+      "config": {
+        "lookback": 4,
+        "vol_mult": 2.82,
+        "sl_percent": 1.53,
+        "trailing_min_gain": 0.51,
+        "fee_percent": 0.08
+      },
+      "summary": {
+        "trades": 6,
+        "wins": 3,
+        "losses": 3,
+        "win_rate": 50.0,
+        "total_pnl": -1.69,
+        "total_fees": 1.08,
+        "final_balance": 117.77,
+        "roi": -1.86,
+        "avg_pnl": -0.28,
+        "max_dd": 2.6,
+        "max_pnl_trade": 1.04,
+        "score": 3.2
+      },
+      "score": 3.2
+    }
+  ]
+}

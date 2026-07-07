@@ -14,7 +14,7 @@ from src.exchange import ExchangeManager
 from src.notifications import notify_buy, notify_sell, notify_sl
 from src.logger.trades import log_trade
 from src.logger.performance import log_strategy_trade
-from src.strategy import Signal, STRATEGY_REGISTRY
+from src.strategies import Signal, STRATEGY_REGISTRY
 
 
 @dataclass

@@ -70,5 +70,50 @@
     "pnl": null,
     "balance": 125.4494,
     "details": {}
+  },
+  {
+    "type": "startup",
+    "message": "Bot iniciado \u2014 modo LIVE",
+    "timestamp": "2026-07-06T23:58:42.093027+00:00",
+    "price": null,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "heartbeat",
+    "message": "ESPERANDO | \ud83d\udcb055939\u20ac | \ud83c\udfe6125\u20ac",
+    "timestamp": "2026-07-06T23:58:51.958970+00:00",
+    "price": 55939.1,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "heartbeat",
+    "message": "ESPERANDO | \ud83d\udcb055935\u20ac | \ud83c\udfe6125\u20ac",
+    "timestamp": "2026-07-07T00:03:57.589649+00:00",
+    "price": 55935.4,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "startup",
+    "message": "Bot iniciado \u2014 modo LIVE",
+    "timestamp": "2026-07-07T11:43:56.172184+00:00",
+    "price": null,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
+  },
+  {
+    "type": "heartbeat",
+    "message": "ESPERANDO | \ud83d\udcb055253\u20ac | \ud83c\udfe6125\u20ac",
+    "timestamp": "2026-07-07T11:44:06.082932+00:00",
+    "price": 55252.9,
+    "pnl": null,
+    "balance": 125.4494,
+    "details": {}
   }
 ]
