@@ -262,6 +262,44 @@ def senal_breakout(ind: dict, i: int, cfg: dict) -> str | None:
     return None
 
 
+def senal_triple(ind: dict, i: int, cfg: dict) -> str | None:
+    """TRIPLE CONFIRMACION: MACD valley + RSI < umbral + precio cerca de BB inferior.
+
+    Busca la confluencia de 3 indicadores para minimizar falsas senales.
+    """
+    h = _hist_buf(ind["hist_arr"], i)
+    rsi = ind["rsi_arr"]
+    bb_d = ind["bb_down"]
+    closes = ind["closes"]
+
+    if len(h) < 4: return None
+    min_h = cfg.get("min_histogram_abs", 50)
+    rsi_max = cfg.get("rsi_max", 30)
+    bb_dist_pct = cfg.get("bb_max_distance_pct", 2.0)  # % del precio maximo desde BB inferior
+
+    rsi_v = float(rsi[i]) if i < len(rsi) and not np.isnan(rsi[i]) else 999
+    cl = float(closes[i])
+
+    # 1. MACD valley
+    if not (h[-4] >= h[-3] > h[-2] < h[-1] and h[-2] < 0 and abs(h[-2]) >= min_h):
+        return None
+
+    # 2. RSI sobrevendido (mas restrictivo)
+    if not (rsi_v < rsi_max):
+        return None
+
+    # 3. Precio cerca de banda inferior de Bollinger (a menos de X%)
+    if i >= 20 and not np.isnan(bb_d[i]):
+        if bb_d[i] > 0:
+            dist_to_bb = (cl - bb_d[i]) / bb_d[i] * 100
+            if dist_to_bb > bb_dist_pct:
+                return None  # muy lejos de la banda inferior
+    else:
+        return None
+
+    return "buy"
+
+
 def _hist_buf(hist_arr: np.ndarray, i: int) -> list[float]:
     h = []
     for j in range(max(0, i-4), i+1):
@@ -282,9 +320,15 @@ ESTRATEGIAS: list[dict] = [
     },
     {
         "id": "macd_rsi_filtro",
-        "nombre": "MACD+RSI<30",
+        "nombre": "MACD+RSI<40",
         "senal": senal_macd_rsi,
         "config": {"min_histogram_abs": 60, "rsi_max": 40, "sl_percent": 4.95, "trailing_min_gain": 1.05, "fee_percent": 0.0},
+    },
+    {
+        "id": "macd_rsi_30",
+        "nombre": "MACD+RSI<30",
+        "senal": senal_macd_rsi,
+        "config": {"min_histogram_abs": 60, "rsi_max": 30, "sl_percent": 4.95, "trailing_min_gain": 1.05, "fee_percent": 0.0},
     },
     {
         "id": "bb_rsi",
@@ -310,6 +354,12 @@ ESTRATEGIAS: list[dict] = [
         "senal": senal_breakout,
         "config": {"lookback": 20, "vol_threshold": 1.5, "sl_percent": 4.95, "trailing_min_gain": 1.05, "fee_percent": 0.0},
     },
+    {
+        "id": "triple_confirmacion",
+        "nombre": "Triple Confirmacion",
+        "senal": senal_triple,
+        "config": {"min_histogram_abs": 50, "rsi_max": 30, "bb_max_distance_pct": 2.0, "sl_percent": 4.95, "trailing_min_gain": 1.05, "fee_percent": 0.0},
+    },
 ]
 
 
@@ -321,8 +371,12 @@ def simular_estrategia(
     est: dict,
     capital: float = INITIAL_EUR,
     fee_rate: float = FEE_RATE,
-) -> ResultadoSim:
-    """Ejecuta la simulacion para una estrategia y devuelve ResultadoSim."""
+    return_trades: bool = False,
+) -> ResultadoSim | tuple[ResultadoSim, list[tuple]]:
+    """Ejecuta la simulacion para una estrategia y devuelve ResultadoSim.
+
+    Si return_trades=True, devuelve (ResultadoSim, trades).
+    """
     cfg = est["config"]
     senal_fn = est["senal"]
     sl_rate = cfg.get("sl_percent", 4.95) / 100.0
@@ -454,6 +508,8 @@ def simular_estrategia(
     # Score: pondera ROI mensual, winrate, PnL por operacion, penaliza drawdown
     r.score = r.roi_mensual * 0.4 + r.winrate * 0.15 + r.pnl_por_operacion * 0.3 - r.max_drawdown * 0.15
 
+    if return_trades:
+        return r, trades
     return r
 
 
